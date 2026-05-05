@@ -21,19 +21,13 @@
     }
   },
   "runArgs": [],
-  "forwardPorts": [
-    9200,
-    5601,
-    9229,
-    9230,
-    9231,
-    9001
-  ],
+  "forwardPorts": [9200, 5601, 9229, 9230, 9231, 9001],
   "postStartCommand": "${containerWorkspaceFolder}/.devcontainer/scripts/post_start.sh",
   "mounts": [
     "source=kibana-node-modules,target=${containerWorkspaceFolder}/node_modules,type=volume",
     "source=kibana-es-data,target=${containerWorkspaceFolder}/.es,type=volume",
-    "source=kibana-target,target=${containerWorkspaceFolder}/target,type=volume"
+    "source=kibana-target,target=${containerWorkspaceFolder}/target,type=volume",
+    "source=claude-code-config,target=/home/node/.claude,type=volume"
   ],
   "remoteUser": "vscode",
   "containerEnv": {
@@ -47,6 +41,7 @@
     "ghcr.io/devcontainers/features/github-cli:1": {
       "installDirectlyFromGitHubRelease": true,
       "version": "latest"
-    }
+    },
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
   }
 }
