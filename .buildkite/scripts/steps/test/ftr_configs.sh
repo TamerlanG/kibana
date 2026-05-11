@@ -68,6 +68,8 @@ while read -r config; do
   fi
 
   start=$(date +%s)
+  # Epoch-ms snapshot used to identify junit XMLs produced by this config run.
+  preStartMs=$(node -e 'process.stdout.write(String(Date.now()))')
 
   if [[ "${USE_CHROME_BETA:-}" =~ ^(1|true)$ ]]; then
     echo "USE_CHROME_BETA was set - using google-chrome-beta"
@@ -115,6 +117,57 @@ while read -r config; do
     duration="${min}m ${sec}s"
   else
     duration="${timeSec}s"
+  fi
+
+  # "Ignore previously-passing flakes on retry" logic.
+  #
+  # We still run the full config on retry (stateful setup requires it), but we
+  # only block on the tests that actually failed in the previous attempt.
+  # - First attempt: if any test cases failed, snapshot their IDs in
+  #   buildkite-agent meta-data, keyed by config path.
+  # - Retry (BUILDKITE_RETRY_COUNT >= 1): if none of the previously-failing
+  #   tests are still failing, treat the config as green and surface the
+  #   new failures as flake noise. Otherwise, narrow the stored set to the
+  #   still-failing tests for any further retries.
+  #
+  # Opt-out via FTR_IGNORE_FIXED_RETRY=false. Always disabled for flaky
+  # test runs (which intentionally surface every failure).
+  IGNORE_FIXED_RETRY=${FTR_IGNORE_FIXED_RETRY:-true}
+  if [[ "$IS_FLAKY_TEST_RUN" == "true" ]]; then
+    IGNORE_FIXED_RETRY="false"
+  fi
+
+  if [[ "$IGNORE_FIXED_RETRY" == "true" ]]; then
+    configKeySafe=$(printf '%s' "$config" | tr -c 'A-Za-z0-9._-' '_')
+    PREV_FAILURES_KEY="ftr_prev_failed_tests::${configKeySafe}"
+
+    currentFailedTests=$(node .buildkite/scripts/steps/test/list_failed_tests.js "$preStartMs" target/junit 2>/dev/null || true)
+
+    if [[ "${BUILDKITE_RETRY_COUNT:-0}" -ge 1 && $lastCode -ne 0 ]]; then
+      prevFailedTests=$(buildkite-agent meta-data get "$PREV_FAILURES_KEY" --default "" --log-level error || true)
+      if [[ -n "$prevFailedTests" ]]; then
+        stillFailing=$(comm -12 \
+          <(printf '%s\n' "$prevFailedTests" | sort -u) \
+          <(printf '%s\n' "$currentFailedTests" | sort -u))
+        if [[ -z "$stillFailing" ]]; then
+          echo "--- ✅ Retry: previously-failing tests now pass for $config; ignoring new flaky failures"
+          echo "Previously failing tests:"
+          printf '%s\n' "$prevFailedTests"
+          echo ""
+          echo "New failures in this retry (treated as flakes, not blocking):"
+          printf '%s\n' "$currentFailedTests"
+          lastCode=0
+          # Clear stored failures so subsequent retries don't keep applying the override.
+          buildkite-agent meta-data set "$PREV_FAILURES_KEY" ""
+        else
+          echo "--- ❌ Retry: previously-failing tests still failing for $config"
+          printf '%s\n' "$stillFailing"
+          buildkite-agent meta-data set "$PREV_FAILURES_KEY" "$stillFailing"
+        fi
+      fi
+    elif [[ "${BUILDKITE_RETRY_COUNT:-0}" == "0" && $lastCode -ne 0 && -n "$currentFailedTests" ]]; then
+      buildkite-agent meta-data set "$PREV_FAILURES_KEY" "$currentFailedTests"
+    fi
   fi
 
   results+=("- $config
