@@ -11,6 +11,9 @@ import type { FtrProviderContext } from '../../ftr_provider_context';
 
 export default function ({ loadTestFile }: FtrProviderContext) {
   describe('unused_urls_task', () => {
+    // TEMPORARY: validates FTR retry intersection logic. Delete before merging this PR.
+    loadTestFile(require.resolve('./retry'));
+
     loadTestFile(require.resolve('./run'));
   });
 }
