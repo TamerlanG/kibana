@@ -87,6 +87,7 @@ describe('buildFunctionalStepGroup', () => {
     command: 'scripts/run_ftr.sh',
     defaultQueue: 'default-q',
     ftrExtraArgs: { FTR_EXTRA_ARGS: '--bail' },
+    ftrSmartRetryEnabled: 'true',
     envFromLabels: { LABEL: 'v' },
     dependsOn: ['build'],
     retryCount: 1,
@@ -114,6 +115,7 @@ describe('buildFunctionalStepGroup', () => {
     expect(first.env).toEqual({
       FTR_CONFIG_GROUP_KEY: 'a',
       FTR_EXTRA_ARGS: '--bail',
+      FTR_SMART_RETRY_ENABLED: 'true',
       LABEL: 'v',
     });
     expect(first.retry.automatic).toEqual([

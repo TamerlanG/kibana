@@ -54,6 +54,7 @@ describe('loadRunOrderConfig', () => {
     expect(cfg.jestConfigsRetryCount).toBe(RETRIES.JEST);
     expect(cfg.ftrConfigsDeps).toEqual(['build']);
     expect(cfg.jestConfigsDeps).toEqual([]);
+    expect(cfg.ftrSmartRetryEnabled).toBe('true');
     expect(cfg.useSelectiveTesting).toBe(false);
   });
 
@@ -123,6 +124,12 @@ describe('loadRunOrderConfig', () => {
     delete process.env.FTR_CONFIGS_DEPS;
     const cfg = loadRunOrderConfig();
     expect(cfg.ftrConfigsDeps).toEqual(['build']);
+  });
+
+  it('preserves an explicit FTR_SMART_RETRY_ENABLED override', () => {
+    process.env.FTR_SMART_RETRY_ENABLED = 'false';
+    const cfg = loadRunOrderConfig();
+    expect(cfg.ftrSmartRetryEnabled).toBe('false');
   });
 
   it('enables selective testing on PRs by default', () => {

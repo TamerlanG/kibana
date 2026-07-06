@@ -53,6 +53,7 @@ interface FunctionalStepGroupOptions {
   functionalGroups: FunctionalGroup[];
   defaultQueue: string;
   ftrExtraArgs: Record<string, string>;
+  ftrSmartRetryEnabled: string;
   envFromLabels: Record<string, string>;
   dependsOn: string[];
   retryCount: number;
@@ -81,6 +82,7 @@ export function buildFunctionalStepGroup(
         env: {
           FTR_CONFIG_GROUP_KEY: key,
           ...opts.ftrExtraArgs,
+          FTR_SMART_RETRY_ENABLED: opts.ftrSmartRetryEnabled,
           ...opts.envFromLabels,
         },
         retry: {

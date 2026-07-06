@@ -72,6 +72,7 @@ export function loadRunOrderConfig() {
     ftrExtraArgs: process.env.FTR_EXTRA_ARGS
       ? { FTR_EXTRA_ARGS: process.env.FTR_EXTRA_ARGS }
       : ({} as Record<string, string>),
+    ftrSmartRetryEnabled: process.env.FTR_SMART_RETRY_ENABLED ?? 'true',
     envFromLabels: collectEnvFromLabels(),
 
     // default true on PRs

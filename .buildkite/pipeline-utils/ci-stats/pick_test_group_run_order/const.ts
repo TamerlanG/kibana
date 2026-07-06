@@ -34,6 +34,7 @@
  *   FTR_CONFIGS_DEPS             — comma-separated Buildkite step keys this step depends on
  *   JEST_CONFIGS_DEPS            — comma-separated Buildkite step keys this step depends on
  *   FTR_EXTRA_ARGS               — extra CLI args forwarded to FTR jobs via env
+ *   FTR_SMART_RETRY_ENABLED      — enables smart retry for generated FTR config steps
  *   GITHUB_PR_NUMBER             — PR number; activates PR-specific ci-stats source
  *   GITHUB_PR_MERGE_BASE         — merge-base commit; activates selective testing + merge-base source
  *   GITHUB_PR_LABELS             — comma-separated PR labels; activates selective testing when

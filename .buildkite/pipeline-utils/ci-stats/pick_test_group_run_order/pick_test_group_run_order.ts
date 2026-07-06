@@ -159,6 +159,7 @@ export async function pickTestGroupRunOrder() {
         functionalGroups,
         defaultQueue,
         ftrExtraArgs: config.ftrExtraArgs,
+        ftrSmartRetryEnabled: config.ftrSmartRetryEnabled,
         envFromLabels: config.envFromLabels,
         dependsOn: config.ftrConfigsDeps,
         retryCount: config.ftrConfigsRetryCount,
