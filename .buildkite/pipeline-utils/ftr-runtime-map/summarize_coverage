@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+
+/*
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
+ */
+
+const path = require('path');
+const parseArgs = require('minimist');
+
+require('ts-node').register({
+  transpileOnly: true,
+  compilerOptions: {
+    module: 'commonjs',
+  },
+  project: path.join(__dirname, '../../tsconfig.json'),
+});
+
+const { summarizeFtrCoverage } = require(path.join(__dirname, './summarize'));
+const { printSummary, writeDetailJson } = require(path.join(__dirname, './report'));
+
+const HELP_TEXT = `
+Usage: summarize_coverage <coverage-dir> [options]
+
+Summarize a NODE_V8_COVERAGE directory from an FTR run into the @kbn/ modules
+whose functions were executed. Subtract a boot baseline (recorded with
+\`node scripts/functional_tests --dry-run\`) to isolate what the tests
+actually exercised from what runs on every Kibana boot.
+
+Options:
+  --baseline <dir>  Coverage dir of a --dry-run run of the same config to subtract
+  --json <file>     Also write a { [moduleId]: filePaths[] } detail JSON
+  --help, -h        Show this help message
+
+Examples:
+  summarize_coverage /tmp/ftr-cov/test-run
+  summarize_coverage /tmp/ftr-cov/test-run --baseline /tmp/ftr-cov/baseline --json detail.json
+`.trim();
+
+function main() {
+  const argv = parseArgs(process.argv.slice(2), {
+    boolean: ['help'],
+    string: ['baseline', 'json'],
+    alias: { h: 'help' },
+    unknown: rejectUnknownFlags,
+  });
+
+  if (argv.help || argv._.length !== 1) {
+    console.log(HELP_TEXT);
+    process.exit(argv.help ? 0 : 1);
+  }
+
+  try {
+    const summary = summarizeFtrCoverage({
+      runDir: argv._[0],
+      baselineDir: lastValue(argv.baseline) || undefined,
+    });
+
+    printSummary(summary);
+    if (argv.json) {
+      writeDetailJson(summary, lastValue(argv.json));
+    }
+    process.exit(0);
+  } catch (error) {
+    console.error('Error summarizing coverage:', error.message);
+    process.exit(1);
+  }
+}
+
+/** Reject typo'd flags instead of silently ignoring them. */
+function rejectUnknownFlags(arg) {
+  if (arg.startsWith('-')) {
+    console.error(`Unknown flag: ${arg}\n`);
+    console.log(HELP_TEXT);
+    process.exit(1);
+  }
+  return true;
+}
+
+/** minimist turns repeated flags into arrays; keep the last occurrence. */
+function lastValue(value) {
+  return Array.isArray(value) ? value[value.length - 1] : value;
+}
+
+main();
