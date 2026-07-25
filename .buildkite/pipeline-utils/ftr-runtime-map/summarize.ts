@@ -255,6 +255,91 @@ function aggregateNewFunctions(
   return { rows, filesByModule, newFunctionCount };
 }
 
+export interface FunctionDetail {
+  moduleId: string;
+  filePath: string;
+  functionName: string;
+  startOffset: number;
+  origin: 'server' | 'browser';
+}
+
+/**
+ * Function-level detail for a single module: every executed function attributed
+ * to `moduleId`, keyed `<filePath>::<functionName>::<startOffset>`. Used by the
+ * inspect drill-down to answer "exactly which functions of package X ran".
+ */
+export function collectModuleFunctions(
+  coverageDir: string,
+  moduleId: string
+): Map<string, FunctionDetail> {
+  const repoRoot = getKibanaDir();
+  const coverageFiles = fs
+    .readdirSync(coverageDir)
+    .filter((f) => f.startsWith('coverage-') && f.endsWith('.json'))
+    .sort();
+
+  const found = new Map<string, FunctionDetail>();
+  for (const coverageFile of coverageFiles) {
+    let data: V8CoverageFile;
+    try {
+      data = JSON.parse(fs.readFileSync(path.join(coverageDir, coverageFile), 'utf8'));
+    } catch {
+      continue;
+    }
+    for (const script of data.result ?? []) {
+      const classified = classifyUrl(script.url, repoRoot);
+      if (!classified || classified.record.moduleId !== moduleId) {
+        continue;
+      }
+      const { record, origin } = classified;
+      for (const fn of script.functions ?? []) {
+        const ranges = fn.ranges ?? [];
+        if (!ranges.some((range) => range.count > 0)) {
+          continue;
+        }
+        const startOffset = ranges[0]?.startOffset ?? 0;
+        const key = `${record.filePath}::${fn.functionName}::${startOffset}`;
+        if (!found.has(key)) {
+          found.set(key, {
+            moduleId,
+            filePath: record.filePath,
+            functionName: fn.functionName,
+            startOffset,
+            origin,
+          });
+        }
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * The functions of `moduleId` that executed in the run but not the baseline —
+ * i.e. exactly what earns that module a place in the summary for this config.
+ */
+export function inspectModule({
+  runDir,
+  baselineDir,
+  moduleId,
+}: {
+  runDir: string;
+  baselineDir?: string;
+  moduleId: string;
+}): FunctionDetail[] {
+  const run = collectModuleFunctions(runDir, moduleId);
+  const baseline = baselineDir ? collectModuleFunctions(baselineDir, moduleId) : new Map();
+  return [...run.entries()]
+    .filter(([key]) => !baseline.has(key))
+    .map(([, detail]) => detail)
+    .sort(
+      (a, b) =>
+        a.filePath.localeCompare(b.filePath) ||
+        a.startOffset - b.startOffset ||
+        a.functionName.localeCompare(b.functionName)
+    );
+}
+
 interface ClassifiedScript {
   record: ExecutedFunctionRecord;
   origin: 'server' | 'browser';

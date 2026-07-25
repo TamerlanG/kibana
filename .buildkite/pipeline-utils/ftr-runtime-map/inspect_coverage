@@ -1,0 +1,95 @@
+#!/usr/bin/env node
+
+/*
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
+ */
+
+// Drill down into a recorded run (kept with --keep-raw) and print the exact
+// functions of one package that executed in the test run but not the baseline.
+
+const path = require('path');
+const fs = require('fs');
+const parseArgs = require('minimist');
+
+require('ts-node').register({
+  transpileOnly: true,
+  compilerOptions: {
+    module: 'commonjs',
+  },
+  project: path.join(__dirname, '../../tsconfig.json'),
+});
+
+const { inspectModule } = require(path.join(__dirname, './summarize'));
+
+const HELP_TEXT = `
+Usage: inspect_coverage --out-dir <dir> --module <@kbn/...> [options]
+
+Print the exact functions of a package that executed in the test run but not the
+boot baseline — i.e. why that package appears in the config's coverage. Requires
+raw dumps kept via 'record_coverage ... --keep-raw'.
+
+Options:
+  --out-dir <dir>   record_coverage working dir (must contain test-run/ and baseline/)
+  --run <dir>       Explicit test-run coverage dir (overrides --out-dir/test-run)
+  --baseline <dir>  Explicit baseline coverage dir (overrides --out-dir/baseline)
+  --module <id>     The @kbn/ module to inspect (required)
+  --help, -h        Show this help message
+
+Example:
+  inspect_coverage --out-dir target/ftr-runtime-map/console_v4 --module @kbn/security-plugin
+`.trim();
+
+function main() {
+  const argv = parseArgs(process.argv.slice(2), {
+    boolean: ['help'],
+    string: ['out-dir', 'run', 'baseline', 'module'],
+    alias: { h: 'help' },
+  });
+
+  if (argv.help || !argv.module || (!argv['out-dir'] && !argv.run)) {
+    console.log(HELP_TEXT);
+    process.exit(argv.help ? 0 : 1);
+  }
+
+  const runDir = argv.run || path.join(argv['out-dir'], 'test-run');
+  const baselineDir = argv.baseline || (argv['out-dir'] && path.join(argv['out-dir'], 'baseline'));
+
+  if (!fs.existsSync(runDir)) {
+    console.error(`test-run dir not found: ${runDir} (did you pass --keep-raw when recording?)`);
+    process.exit(1);
+  }
+
+  try {
+    const details = inspectModule({
+      runDir,
+      baselineDir: baselineDir && fs.existsSync(baselineDir) ? baselineDir : undefined,
+      moduleId: argv.module,
+    });
+
+    if (details.length === 0) {
+      console.log(`No functions of ${argv.module} executed only in the test run.`);
+      process.exit(0);
+    }
+
+    console.log(`${argv.module}: ${details.length} functions executed (run minus baseline)\n`);
+    let currentFile = '';
+    for (const d of details) {
+      if (d.filePath !== currentFile) {
+        currentFile = d.filePath;
+        console.log(`  ${d.filePath}  [${d.origin}]`);
+      }
+      console.log(`      @${d.startOffset}  ${d.functionName || '(anonymous)'}`);
+    }
+    process.exit(0);
+  } catch (error) {
+    console.error('Error inspecting coverage:', error.message);
+    process.exit(1);
+  }
+}
+
+main();

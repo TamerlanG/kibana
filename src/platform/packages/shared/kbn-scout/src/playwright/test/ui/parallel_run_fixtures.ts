@@ -30,6 +30,7 @@ import {
   pageObjectsParallelFixture,
   networkFixture,
   validateTagsFixture,
+  browserCoverageFixture,
 } from '../../fixtures/scope/test';
 import type {
   BrowserAuthFixture,
@@ -49,7 +50,9 @@ export const scoutParallelFixtures = mergeTests(
   scoutPageParallelFixture,
   pageObjectsParallelFixture,
   networkFixture,
-  validateTagsFixture
+  validateTagsFixture,
+  // opt-in (SCOUT_BROWSER_COVERAGE_DIR) browser coverage recording
+  browserCoverageFixture
 );
 
 export interface ScoutParallelTestFixtures {

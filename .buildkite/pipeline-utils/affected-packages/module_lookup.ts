@@ -109,6 +109,35 @@ export function getModuleDependencies(moduleDir: string): string[] {
   return [];
 }
 
+/**
+ * Transitive upstream dependency closure of a module: every module it depends on
+ * (directly or transitively) via tsconfig `kbn_references`, including itself.
+ *
+ * This is the per-config equivalent of static selection: a config owned by module
+ * M is statically selected when a changed package P is in `getUpstreamClosure(M)`
+ * — the exact inverse of the downstream-BFS production selection performs. Used by
+ * the runtime-vs-static comparison harness.
+ */
+export function getUpstreamClosure(moduleId: string): Set<string> {
+  const lookup = getModuleLookup();
+  const closure = new Set<string>([moduleId]);
+  const queue = [moduleId];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const dir = lookup.byId.get(current);
+    if (!dir) continue;
+    for (const dep of getModuleDependencies(dir)) {
+      if (!closure.has(dep)) {
+        closure.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+
+  return closure;
+}
+
 export function buildModuleDownstreamGraph(): Map<string, Set<string>> {
   const lookup = getModuleLookup();
   const downstreamMap = new Map<string, Set<string>>();

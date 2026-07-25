@@ -24,6 +24,7 @@ import {
   findModuleForPluginId,
   getModuleDependencies,
   buildModuleDownstreamGraph,
+  getUpstreamClosure,
   resetModuleLookupCache,
 } from './module_lookup';
 import { getAffectedModulesGit } from './strategy_git';
@@ -343,6 +344,44 @@ describe('module_lookup', () => {
       const graph = buildModuleDownstreamGraph();
       for (const spec of MODULES) {
         expect(graph.has(spec.id)).toBe(true);
+      }
+    });
+  });
+
+  describe('getUpstreamClosure', () => {
+    it('returns the transitive upstream deps plus the module itself', () => {
+      // @kbn/analytics → @kbn/logging, @kbn/utils → @kbn/core
+      expect(getUpstreamClosure('@kbn/analytics')).toEqual(
+        new Set(['@kbn/analytics', '@kbn/logging', '@kbn/utils', '@kbn/core'])
+      );
+    });
+
+    it('returns just the module for a leaf dependency', () => {
+      expect(getUpstreamClosure('@kbn/core')).toEqual(new Set(['@kbn/core']));
+    });
+
+    it('is the inverse of transitive downstream reachability (P ∈ upstream(M) ⟺ M reachable from P)', () => {
+      const downstream = buildModuleDownstreamGraph();
+      // transitive downstream reachability from P via BFS (what production selection does)
+      const reaches = (from: string): Set<string> => {
+        const seen = new Set<string>();
+        const queue = [from];
+        while (queue.length) {
+          const cur = queue.shift()!;
+          for (const next of downstream.get(cur) ?? []) {
+            if (!seen.has(next)) {
+              seen.add(next);
+              queue.push(next);
+            }
+          }
+        }
+        return seen;
+      };
+      for (const spec of MODULES) {
+        for (const upstreamId of getUpstreamClosure(spec.id)) {
+          if (upstreamId === spec.id) continue;
+          expect(reaches(upstreamId).has(spec.id)).toBe(true);
+        }
       }
     });
   });

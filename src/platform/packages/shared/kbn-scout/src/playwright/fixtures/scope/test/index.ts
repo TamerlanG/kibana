@@ -19,3 +19,4 @@ export { pageContextFixture } from './context/page_context';
 export { perfTrackerFixture } from './performance';
 export type { PerfTrackerFixture } from './performance';
 export { networkFixture, type NetworkFixture } from './network';
+export { browserCoverageFixture } from './browser_coverage';

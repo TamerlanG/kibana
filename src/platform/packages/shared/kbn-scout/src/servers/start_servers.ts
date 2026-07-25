@@ -74,6 +74,16 @@ export async function startServers(log: ToolingLog, options: StartServerOptions)
         '\n\n'
     );
 
+    if (options.exitAfterReady) {
+      // Boot baseline for coverage tooling: gracefully stop the servers now so the
+      // Kibana process flushes its NODE_V8_COVERAGE dump. Uses the same graceful
+      // stop the test run does, so baseline and run function keys align.
+      log.info('exitAfterReady: shutting down servers after successful startup');
+      await procs.stop('kibana');
+      await shutdownEs();
+      return;
+    }
+
     await procs.waitForAllToStop();
     await shutdownEs();
   });

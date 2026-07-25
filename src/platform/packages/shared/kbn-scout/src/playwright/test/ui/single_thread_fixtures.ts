@@ -36,6 +36,7 @@ import {
   persistentContextFixture,
   perfTrackerFixture,
   networkFixture,
+  browserCoverageFixture,
 } from '../../fixtures/scope/test';
 import type {
   BrowserAuthFixture,
@@ -63,7 +64,9 @@ export const scoutFixtures = mergeTests(
   networkFixture,
   validateTagsFixture,
   // performance fixtures
-  perfTrackerFixture
+  perfTrackerFixture,
+  // opt-in (SCOUT_BROWSER_COVERAGE_DIR) browser coverage recording
+  browserCoverageFixture
 );
 
 export interface ScoutTestFixtures {

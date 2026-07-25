@@ -106,6 +106,45 @@ Browser-coverage caveats:
 - Each navigation pays one CDP flush round-trip (payloads can be MBs), only in
   recording runs.
 
+## Scout configs
+
+`record_coverage` auto-detects a Scout config (`.../test/scout*/**/playwright.config.ts`)
+and switches runners: the test run is `scout run-tests`, the boot baseline is
+`scout start-server --exitAfterReady` (a flag added to kbn-scout that boots the
+servers and then gracefully stops them so Kibana flushes its coverage dump —
+signalling the CLI does not work because Scout's proc-runner SIGKILLs children on
+exit). Server/runner recording uses `NODE_V8_COVERAGE` exactly as FTR does; the
+browser side uses a Playwright-native coverage fixture in kbn-scout
+(`page.coverage`, gated by `SCOUT_BROWSER_COVERAGE_DIR`) which writes the same
+`coverage-browser-*.json` dumps — so `summarize.ts` is unchanged.
+
+```
+record_coverage x-pack/platform/plugins/shared/embeddable_alerts_table/test/scout/ui/playwright.config.ts \
+  --arch stateful --domain classic
+```
+
+`--arch` (default `stateful`) and `--domain` (default `classic`) are Scout-only.
+
+For Scout **UI** configs the baseline is a blank-page run (log in + load a
+Kibana page + idle, via `test/scout/ui/baseline.playwright.config.ts`) so it
+captures the plugin-registration coverage every page load triggers — otherwise
+every UI plugin's `public` bundle looks test-exercised. Scout **API** configs
+use a server-only `start-server --exitAfterReady` baseline. The blank-page
+baseline uses the `default` server config set, so it is accurate for
+default-config-set UI configs (the common case).
+
+### Runtime-vs-static comparison (Scout only, automatic)
+
+For Scout configs, `record_coverage` also prints how the runtime-observed
+coverage compares to Scout's existing STATIC selective testing (the upstream
+dependency closure of the config's owning module + the implicit-consumer
+overlay). It reports, per package: agree / under-selected (runtime ran it,
+static would skip — a correctness-risk candidate for a new overlay rule) /
+over-selected (static selects it, never ran) / harness, plus recall/precision.
+
+To re-run just the comparison on an already-recorded `packages.json` (no
+re-recording), use `compare_scout_selection --config <cfg> --runtime-json <file>`.
+
 ## Caveats
 
 - Raw dumps are large (~200MB per run for a small config); `record_coverage`
