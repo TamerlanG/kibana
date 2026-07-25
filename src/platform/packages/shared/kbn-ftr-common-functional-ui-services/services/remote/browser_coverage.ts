@@ -150,6 +150,8 @@ export class BrowserCoverageCollector {
     if (scripts.length === 0) {
       return;
     }
+    // Filename prefix + `{ result }` envelope are the on-disk contract read by
+    // `.buildkite/pipeline-utils/ftr-runtime-map/const.ts` — keep them in sync.
     const fileName = `coverage-browser-${String(this.seq++).padStart(4, '0')}.json`;
     Fs.writeFileSync(Path.join(this.coverageDir, fileName), JSON.stringify({ result: scripts }));
   }

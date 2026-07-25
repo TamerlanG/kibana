@@ -14,16 +14,13 @@ const fs = require('fs');
 const { spawnSync } = require('child_process');
 const parseArgs = require('minimist');
 
-require('ts-node').register({
-  transpileOnly: true,
-  compilerOptions: {
-    module: 'commonjs',
-  },
-  project: path.join(__dirname, '../../tsconfig.json'),
-});
+const { registerTsNode, rejectUnknownFlags, lastValue } = require(path.join(__dirname, './cli'));
+
+registerTsNode();
 
 const { getKibanaDir } = require(path.join(__dirname, '../utils'));
 const { findModuleForPath } = require(path.join(__dirname, '../affected-packages'));
+const { BROWSER_COVERAGE_DUMP_PREFIX } = require(path.join(__dirname, './const'));
 const { summarizeFtrCoverage } = require(path.join(__dirname, './summarize'));
 const { printSummary, writeDetailJson } = require(path.join(__dirname, './report'));
 const { runScoutComparison, printScoutComparison } = require(path.join(
@@ -73,13 +70,10 @@ const SCOUT_UI_CONFIG_RE = /\/test\/scout[^/]*\/ui\//;
 
 // Blank-page baseline config: logs in + loads a Kibana page + idles, so the
 // baseline captures the plugin-registration coverage every UI test triggers on
-// page load. Uses the 'default' server config set (path contains /test/scout/);
-// custom-config-set targets get a generated sibling config instead — see
-// runScoutUiBaseline.
+// page load. Shared across targets; the target's server config set is selected
+// with `--serverConfigSet` (see runScoutUiBaseline) rather than by config path.
 const SCOUT_UI_BASELINE_CONFIG =
   'src/platform/packages/shared/kbn-scout/test/scout/ui/baseline.playwright.config.ts';
-const SCOUT_UI_BASELINE_TEST_DIR =
-  'src/platform/packages/shared/kbn-scout/test/scout/ui/baseline_tests';
 
 // FTR equivalent of the Scout UI baseline: a wrapper config that boots the
 // TARGET config's servers (via FTR_BASELINE_TARGET_CONFIG) but runs a single
@@ -128,7 +122,7 @@ function runFtr(kibanaDir, configPath, coverageDir, { installDir, dryRun }) {
 
 /** True when the test run opened a browser (i.e. this is a UI config). */
 function hasBrowserDumps(coverageDir) {
-  return fs.readdirSync(coverageDir).some((f) => f.startsWith('coverage-browser-'));
+  return fs.readdirSync(coverageDir).some((f) => f.startsWith(BROWSER_COVERAGE_DUMP_PREFIX));
 }
 
 /**
@@ -153,7 +147,18 @@ function runFtrUiBaseline(kibanaDir, targetConfigPath, coverageDir, { installDir
   );
 }
 
-function runScout(kibanaDir, configPath, coverageDir, { installDir, arch, domain }) {
+/**
+ * Run a Scout config through `run-tests`. The same invocation records both the
+ * real test run and the browser baseline (only the label and, for the baseline,
+ * `--serverConfigSet` differ) so the two stay comparable for subtraction.
+ */
+function runScout(
+  kibanaDir,
+  configPath,
+  coverageDir,
+  { installDir, arch, domain },
+  { label = 'scout run-tests', serverConfigSet } = {}
+) {
   const args = [
     'scripts/scout',
     'run-tests',
@@ -166,6 +171,7 @@ function runScout(kibanaDir, configPath, coverageDir, { installDir, arch, domain
     '--config',
     configPath,
   ];
+  if (serverConfigSet) args.push('--serverConfigSet', serverConfigSet);
   if (installDir) args.push('--kibanaInstallDir', installDir);
   spawnNode(
     kibanaDir,
@@ -174,7 +180,7 @@ function runScout(kibanaDir, configPath, coverageDir, { installDir, arch, domain
     // SCOUT_BROWSER_COVERAGE_DIR arms the Playwright coverage fixture; disable the
     // reporter so its own node process doesn't add noise/latency.
     { SCOUT_BROWSER_COVERAGE_DIR: coverageDir, SCOUT_REPORTER_ENABLED: 'false' },
-    'scout run-tests'
+    label
   );
 }
 
@@ -198,88 +204,86 @@ function runScoutServerBaseline(kibanaDir, configPath, coverageDir, { installDir
 }
 
 /**
- * Baseline for a Scout UI config: run the blank-page baseline config through the
- * normal test runner so it captures BOTH the server boot/per-request platform
- * code AND the browser plugin-registration coverage that every page load
+ * Baseline for a Scout UI config: run the shared blank-page baseline config
+ * through the normal test runner so it captures BOTH the server boot/per-request
+ * platform code AND the browser plugin-registration coverage that every page load
  * triggers. Subtracting this removes the "every UI plugin registers on load"
  * noise a plain start-server baseline cannot.
  *
- * Scout derives the server config set from the CONFIG PATH (`/test/scout_<name>/`
- * → the `<name>` set), so for custom-set targets the shared baseline config
- * (default set) would boot the wrong servers. Instead, generate a throwaway
- * config NEXT TO the target — same path-based detection, same servers —
- * pointing at the shared baseline spec, and delete it after the run.
+ * `--serverConfigSet` boots the TARGET's server config set (derived from its
+ * path), so the shared baseline config exercises the same servers as the real
+ * run without needing a config file that lives next to the target.
  */
 function runScoutUiBaseline(kibanaDir, targetConfigPath, coverageDir, opts) {
-  if (deriveServerConfigSet(targetConfigPath) === 'default') {
-    runScoutUiBaselineConfig(kibanaDir, SCOUT_UI_BASELINE_CONFIG, coverageDir, opts);
+  runScout(kibanaDir, SCOUT_UI_BASELINE_CONFIG, coverageDir, opts, {
+    label: 'scout run-tests (browser baseline)',
+    serverConfigSet: deriveServerConfigSet(targetConfigPath),
+  });
+}
+
+/**
+ * Baseline for an FTR/Scout config: record the boot/registration noise to
+ * subtract from the test run. UI configs run a login+home+idle page load so the
+ * browser-registration noise is captured; API/server configs boot the same
+ * servers with no tests.
+ */
+function runBaseline(kibanaDir, configPath, { runDir, baselineDir, isScout, installDir, scoutOpts }) {
+  if (isScout && SCOUT_UI_CONFIG_RE.test(configPath)) {
+    // UI config: blank-page baseline captures browser registration + server per-request noise
+    runScoutUiBaseline(kibanaDir, configPath, baselineDir, scoutOpts);
     return;
   }
-
-  const targetDir = path.dirname(path.resolve(kibanaDir, targetConfigPath));
-  const tempConfigPath = path.join(targetDir, 'coverage_baseline.playwright.config.ts');
-  fs.writeFileSync(
-    tempConfigPath,
-    [
-      '// GENERATED by .buildkite/pipeline-utils/ftr-runtime-map/record_coverage;',
-      '// lives next to the target config so Scout boots the same server config set.',
-      '// Deleted after the baseline run — do not commit.',
-      "import { createPlaywrightConfig } from '@kbn/scout';",
-      '',
-      'export default createPlaywrightConfig({',
-      `  testDir: ${JSON.stringify(path.resolve(kibanaDir, SCOUT_UI_BASELINE_TEST_DIR))},`,
-      '});',
-      '',
-    ].join('\n')
-  );
+  if (isScout) {
+    // API config: no browser, a server-only boot baseline is enough
+    runScoutServerBaseline(kibanaDir, configPath, baselineDir, scoutOpts);
+    return;
+  }
+  if (!hasBrowserDumps(runDir)) {
+    runFtr(kibanaDir, configPath, baselineDir, { installDir, dryRun: true });
+    return;
+  }
+  // FTR UI config (the test run recorded Chrome coverage): boot the same servers
+  // with a login + home + idle spec so the baseline captures the browser
+  // registration noise. Fall back to the server-only --dry-run baseline when the
+  // wrapper cannot run this config (e.g. no home app).
   try {
-    runScoutUiBaselineConfig(kibanaDir, tempConfigPath, coverageDir, opts);
-  } finally {
-    fs.rmSync(tempConfigPath, { force: true });
+    runFtrUiBaseline(kibanaDir, configPath, baselineDir, { installDir });
+  } catch (error) {
+    console.error(
+      `\n⚠️  FTR browser baseline failed (${error.message}); falling back to the ` +
+        'server-only --dry-run baseline — browser rows will include page-load registration noise.\n'
+    );
+    // Discard any partial dumps the failed attempt flushed (Kibana writes a dump
+    // on shutdown even on failure) so the fallback baseline is purely the
+    // --dry-run one, matching the message above.
+    fs.rmSync(baselineDir, { recursive: true, force: true });
+    fs.mkdirSync(baselineDir, { recursive: true });
+    runFtr(kibanaDir, configPath, baselineDir, { installDir, dryRun: true });
   }
 }
 
-function runScoutUiBaselineConfig(
-  kibanaDir,
-  configPath,
-  coverageDir,
-  { installDir, arch, domain }
-) {
-  const args = [
-    'scripts/scout',
-    'run-tests',
-    '--location',
-    'local',
-    '--arch',
-    arch,
-    '--domain',
-    domain,
-    '--config',
-    configPath,
-  ];
-  if (installDir) args.push('--kibanaInstallDir', installDir);
-  spawnNode(
-    kibanaDir,
-    args,
-    coverageDir,
-    { SCOUT_BROWSER_COVERAGE_DIR: coverageDir, SCOUT_REPORTER_ENABLED: 'false' },
-    'scout run-tests (browser baseline)'
-  );
-}
-
-/** Reject typo'd flags instead of silently ignoring them (runs here cost ~20 min). */
-function rejectUnknownFlags(arg) {
-  if (arg.startsWith('-')) {
-    console.error(`Unknown flag: ${arg}\n`);
-    console.log(HELP_TEXT);
-    process.exit(1);
+/**
+ * For Scout configs, compare runtime coverage against Scout's static selection
+ * (upstream dependency closure + implicit-consumer overlay). Never fatal.
+ */
+function compareScoutIfPossible(configPath, summary) {
+  try {
+    const owningModule = findModuleForPath(configPath);
+    if (!owningModule || owningModule.startsWith('[')) {
+      console.error(`\nskipping static comparison: no owning module for ${configPath}`);
+      return;
+    }
+    console.error('\n==> comparing runtime coverage against static selection');
+    printScoutComparison(
+      runScoutComparison({
+        owningModule,
+        runtimeServer: new Set(summary.rows.map((r) => r.moduleId)),
+        runtimeBrowser: new Set(summary.browserRows.map((r) => r.moduleId)),
+      })
+    );
+  } catch (error) {
+    console.error(`\nstatic comparison failed (non-fatal): ${error.message}`);
   }
-  return true;
-}
-
-/** minimist turns repeated flags into arrays; keep the last occurrence. */
-function lastValue(value) {
-  return Array.isArray(value) ? value[value.length - 1] : value;
 }
 
 function main() {
@@ -287,7 +291,7 @@ function main() {
     boolean: ['help', 'keep-raw'],
     string: ['out-dir', 'json', 'kibana-install-dir', 'arch', 'domain'],
     alias: { h: 'help' },
-    unknown: rejectUnknownFlags,
+    unknown: rejectUnknownFlags(HELP_TEXT),
   });
 
   if (argv.help || argv._.length !== 1) {
@@ -335,34 +339,7 @@ function main() {
     }
 
     console.error('==> [2/3] recording boot baseline (no tests)');
-    if (isScout && SCOUT_UI_CONFIG_RE.test(configPath)) {
-      // UI config: blank-page baseline captures browser registration + server per-request noise
-      runScoutUiBaseline(kibanaDir, configPath, baselineDir, scoutOpts);
-    } else if (isScout) {
-      // API config: no browser, a server-only boot baseline is enough
-      runScoutServerBaseline(kibanaDir, configPath, baselineDir, scoutOpts);
-    } else if (hasBrowserDumps(runDir)) {
-      // FTR UI config (the test run recorded Chrome coverage): boot the same
-      // servers with a login + home + idle spec so the baseline captures the
-      // browser registration noise. Fall back to the server-only --dry-run
-      // baseline when the wrapper cannot run this config (e.g. no home app).
-      try {
-        runFtrUiBaseline(kibanaDir, configPath, baselineDir, { installDir });
-      } catch (error) {
-        console.error(
-          `\n⚠️  FTR browser baseline failed (${error.message}); falling back to the ` +
-            'server-only --dry-run baseline — browser rows will include page-load registration noise.\n'
-        );
-        // Discard any partial dumps the failed attempt flushed (Kibana writes a
-        // dump on shutdown even on failure) so the fallback baseline is purely
-        // the --dry-run one, matching the message above.
-        fs.rmSync(baselineDir, { recursive: true, force: true });
-        fs.mkdirSync(baselineDir, { recursive: true });
-        runFtr(kibanaDir, configPath, baselineDir, { installDir, dryRun: true });
-      }
-    } else {
-      runFtr(kibanaDir, configPath, baselineDir, { installDir, dryRun: true });
-    }
+    runBaseline(kibanaDir, configPath, { runDir, baselineDir, isScout, installDir, scoutOpts });
 
     console.error('==> [3/3] subtracting baseline and summarizing');
     const summary = summarizeFtrCoverage({ runDir, baselineDir });
@@ -380,26 +357,8 @@ function main() {
     printSummary(summary);
     writeDetailJson(summary, jsonPath);
 
-    // For Scout configs, also compare runtime coverage against Scout's static
-    // selection (upstream dependency closure + implicit-consumer overlay).
     if (isScout) {
-      try {
-        const owningModule = findModuleForPath(configPath);
-        if (!owningModule || owningModule.startsWith('[')) {
-          console.error(`\nskipping static comparison: no owning module for ${configPath}`);
-        } else {
-          console.error('\n==> comparing runtime coverage against static selection');
-          printScoutComparison(
-            runScoutComparison({
-              owningModule,
-              runtimeServer: new Set(summary.rows.map((r) => r.moduleId)),
-              runtimeBrowser: new Set(summary.browserRows.map((r) => r.moduleId)),
-            })
-          );
-        }
-      } catch (error) {
-        console.error(`\nstatic comparison failed (non-fatal): ${error.message}`);
-      }
+      compareScoutIfPossible(configPath, summary);
     }
 
     if (!argv['keep-raw']) {

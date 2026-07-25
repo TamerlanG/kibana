@@ -56,6 +56,8 @@ export const browserCoverageFixture = coreWorkerFixtures.extend<{
           const result = entries.map(({ source, ...rest }) => rest);
           if (result.length > 0) {
             Fs.mkdirSync(coverageDir, { recursive: true });
+            // Filename prefix + `{ result }` envelope are the on-disk contract read
+            // by `.buildkite/pipeline-utils/ftr-runtime-map/const.ts` — keep in sync.
             const fileName = `coverage-browser-${process.pid}-${String(seq++).padStart(
               4,
               '0'

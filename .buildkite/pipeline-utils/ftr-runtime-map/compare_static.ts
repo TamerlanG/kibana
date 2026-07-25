@@ -24,12 +24,17 @@
  * This module is pure (no fs/git); the CLI gathers the repo-derived sets.
  */
 
+// Import the leaf const modules (not the fs-touching barrels) to keep this pure.
+import { UNCATEGORIZED_MODULE_ID } from '../affected-packages/const';
+import { BROWSER_UNATTRIBUTED_MODULE_ID } from './const';
+
 /** Packages that force a full run when changed (harness/test infra); never a real signal. */
 export const HARNESS_PACKAGE_RE = /^@kbn\/(scout|test|dev-|ftr-|jest-)/;
 
+/** Synthetic module ids that are never real packages and must be dropped from every set. */
 export const RUNTIME_SENTINELS: ReadonlySet<string> = new Set([
-  '[uncategorized]',
-  '[browser-unattributed]',
+  UNCATEGORIZED_MODULE_ID,
+  BROWSER_UNATTRIBUTED_MODULE_ID,
 ]);
 
 export type Classification =

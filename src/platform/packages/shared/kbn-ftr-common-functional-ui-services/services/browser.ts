@@ -240,6 +240,19 @@ class BrowserService extends FtrService {
   }
 
   /**
+   * Runs a navigation, flushing browser coverage before and after it. Precise
+   * coverage is lost on cross-process navigations, so the pre-flush collects what
+   * the current page recorded and the post-flush captures the page-load execution
+   * (or, on a swapped-in un-armed renderer, recovers it via best-effort coverage
+   * and re-arms). A no-op when coverage collection is disabled.
+   */
+  private async withCoverageFlush(navigate: () => Promise<void>): Promise<void> {
+    await this.coverage?.flush();
+    await navigate();
+    await this.coverage?.flush();
+  }
+
+  /**
    * Navigates the focused window/frame to a new URL.
    * https://seleniumhq.github.io/selenium/docs/api/javascript/module/selenium-webdriver/chrome_exports_Driver.html#get
    *
@@ -248,22 +261,13 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async get(url: string, insertTimestamp: boolean = true) {
-    // precise coverage is lost on cross-process navigations: collect what the
-    // current page recorded, navigate, then flush again — the post-navigation
-    // flush captures the page-load execution (or, on a swapped-in un-armed
-    // renderer, recovers it via best-effort coverage and re-arms)
-    await this.coverage?.flush();
-    if (insertTimestamp) {
-      const urlWithTime = modifyUrl(url, (parsed) => {
-        (parsed.query as any)._t = Date.now();
-        return void 0;
-      });
-
-      await this.driver.get(urlWithTime);
-    } else {
-      await this.driver.get(url);
-    }
-    await this.coverage?.flush();
+    const finalUrl = insertTimestamp
+      ? modifyUrl(url, (parsed) => {
+          (parsed.query as any)._t = Date.now();
+          return void 0;
+        })
+      : url;
+    await this.withCoverageFlush(() => this.driver.get(finalUrl));
   }
 
   /**
@@ -434,9 +438,7 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async refresh() {
-    await this.coverage?.flush();
-    await this.driver.navigate().refresh();
-    await this.coverage?.flush();
+    await this.withCoverageFlush(() => this.driver.navigate().refresh());
   }
 
   /**
@@ -446,9 +448,7 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async goBack() {
-    await this.coverage?.flush();
-    await this.driver.navigate().back();
-    await this.coverage?.flush();
+    await this.withCoverageFlush(() => this.driver.navigate().back());
   }
 
   /**
@@ -458,9 +458,7 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async goForward() {
-    await this.coverage?.flush();
-    await this.driver.navigate().forward();
-    await this.coverage?.flush();
+    await this.withCoverageFlush(() => this.driver.navigate().forward());
   }
 
   /**
@@ -470,9 +468,7 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async navigateTo(url: string) {
-    await this.coverage?.flush();
-    await this.driver.navigate().to(url);
-    await this.coverage?.flush();
+    await this.withCoverageFlush(() => this.driver.navigate().to(url));
   }
 
   /**

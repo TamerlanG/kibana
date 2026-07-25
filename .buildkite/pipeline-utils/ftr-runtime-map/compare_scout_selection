@@ -18,13 +18,9 @@ const path = require('path');
 const fs = require('fs');
 const parseArgs = require('minimist');
 
-require('ts-node').register({
-  transpileOnly: true,
-  compilerOptions: {
-    module: 'commonjs',
-  },
-  project: path.join(__dirname, '../../tsconfig.json'),
-});
+const { registerTsNode } = require(path.join(__dirname, './cli'));
+
+registerTsNode();
 
 const { findModuleForPath } = require(path.join(__dirname, '../affected-packages'));
 const { runScoutComparison, printScoutComparison } = require(path.join(

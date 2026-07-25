@@ -17,41 +17,11 @@
 import { execSync } from 'child_process';
 import minimatch from 'minimatch';
 
+import { IMPLICIT_REGISTRY_CONSUMERS } from '../scout_implicit_registry_consumers';
 import { findModuleForPath, getUpstreamClosure } from '../affected-packages';
 import { getKibanaDir } from '../utils';
 import { compareScoutSelection } from './compare_static';
 import type { ComparisonReport } from './compare_static';
-
-/**
- * Mirror of the overlay rules in
- * `.buildkite/scripts/steps/test/scout/scout_implicit_consumers.ts`. Duplicated
- * (not imported) because the `@kbn/imports` boundary forbids pipeline-utils from
- * importing CI test-step code; keep in sync with that file. The comparison uses
- * these to classify runtime-only packages that a hand-maintained rule already
- * covers ("overlay-rediscovered").
- */
-const IMPLICIT_REGISTRY_CONSUMERS: ReadonlyArray<{
-  patterns: readonly string[];
-  consumers: readonly string[];
-}> = [
-  {
-    patterns: [
-      '**/plugins/**/public/embeddables/**/*.{ts,tsx}',
-      '**/plugins/**/public/embeddable/**/*.{ts,tsx}',
-      '**/plugins/**/public/react_embeddable/**/*.{ts,tsx}',
-      '**/plugins/**/public/apps/embeddables/**/*.{ts,tsx}',
-      '**/plugins/**/public/ui_actions/**/*.{ts,tsx}',
-      '**/plugins/**/public/trigger_actions/**/*.{ts,tsx}',
-      '**/plugins/**/public/**/actions/register*.{ts,tsx}',
-    ],
-    consumers: [
-      '@kbn/dashboard-plugin',
-      '@kbn/embeddable-plugin',
-      '@kbn/canvas-plugin',
-      '@kbn/lens-plugin',
-    ],
-  },
-];
 
 /** Packages owning ≥1 file matching an overlay rule whose consumers include `owningModule`. */
 export function computeOverlayPublishers(owningModule: string): Set<string> {
@@ -59,6 +29,13 @@ export function computeOverlayPublishers(owningModule: string): Set<string> {
   if (rules.length === 0) {
     return new Set();
   }
+
+  // Compile each glob once; `minimatch(file, pattern)` would recompile it on
+  // every one of the ~100k tracked files otherwise.
+  const { Minimatch } = minimatch;
+  const matchers = rules
+    .flatMap((rule) => rule.patterns)
+    .map((p) => new Minimatch(p, { dot: true }));
 
   const files = execSync('git ls-files', {
     cwd: getKibanaDir(),
@@ -70,7 +47,12 @@ export function computeOverlayPublishers(owningModule: string): Set<string> {
 
   const publishers = new Set<string>();
   for (const file of files) {
-    if (!rules.some((rule) => rule.patterns.some((p) => minimatch(file, p, { dot: true })))) {
+    // Every overlay pattern targets a plugin's `public/` dir — skip the rest
+    // before touching the (comparatively expensive) glob matchers.
+    if (!file.includes('/public/')) {
+      continue;
+    }
+    if (!matchers.some((m) => m.match(file))) {
       continue;
     }
     const mod = findModuleForPath(file);

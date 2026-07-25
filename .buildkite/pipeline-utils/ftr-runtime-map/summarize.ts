@@ -17,6 +17,11 @@ import {
   UNCATEGORIZED_MODULE_ID,
 } from '../affected-packages';
 import { getKibanaDir } from '../utils';
+import {
+  BROWSER_UNATTRIBUTED_MODULE_ID,
+  COVERAGE_DUMP_PREFIX,
+  COVERAGE_DUMP_SUFFIX,
+} from './const';
 
 /** Relevant subset of a `NODE_V8_COVERAGE` output file. */
 interface V8CoverageRange {
@@ -82,8 +87,8 @@ export interface FtrCoverageSummary {
   newBrowserFunctionCount: number;
 }
 
-/** Browser scripts under `/bundles/` that cannot be attributed to a module. */
-export const BROWSER_UNATTRIBUTED_MODULE_ID = '[browser-unattributed]';
+// Re-exported (defined in ./const) so existing importers of `./summarize` keep working.
+export { BROWSER_UNATTRIBUTED_MODULE_ID };
 
 /** Non-plugin browser bundles with a fixed owning module. */
 const STATIC_BUNDLE_MODULES = new Map<string, string>([
@@ -99,24 +104,42 @@ const STATIC_BUNDLE_MODULES = new Map<string, string>([
  */
 const KBN_NODE_MODULES_RE = /\/node_modules\/(@kbn\/[^/]+)\//;
 
-/**
- * Read every `coverage-*.json` in a `NODE_V8_COVERAGE` output directory and
- * return the set of executed repo-owned functions, attributed to the `@kbn/`
- * module that owns the file. Functions are "executed" when any of their V8
- * ranges has `count > 0`. Unparseable coverage files are skipped with a
- * warning so one crashed process cannot invalidate a whole recording.
- */
-export function collectExecutedFunctions(coverageDir: string): CollectedCoverage {
-  const repoRoot = getKibanaDir();
+/** One executed repo-owned function surfaced by {@link forEachExecutedFunction}. */
+interface ExecutedFunctionHit {
+  /** `<filePath>::<functionName>::<startOffset>`, stable across processes. */
+  key: string;
+  record: ExecutedFunctionRecord;
+  origin: 'server' | 'browser';
+  functionName: string;
+  startOffset: number;
+}
 
-  const coverageFiles = fs
+/** Names of the `coverage-*.json` dumps in a `NODE_V8_COVERAGE` directory, sorted. */
+function listCoverageDumps(coverageDir: string): string[] {
+  return fs
     .readdirSync(coverageDir)
-    .filter((f) => f.startsWith('coverage-') && f.endsWith('.json'))
+    .filter((f) => f.startsWith(COVERAGE_DUMP_PREFIX) && f.endsWith(COVERAGE_DUMP_SUFFIX))
     .sort();
-  if (coverageFiles.length === 0) {
-    throw new Error(`No coverage-*.json files found in ${coverageDir}`);
-  }
+}
 
+/**
+ * Walk every `coverage-*.json` dump in a `NODE_V8_COVERAGE` directory and invoke
+ * `onFunction` for each executed repo-owned function (any V8 range with
+ * `count > 0`), attributed to the owning `@kbn/` module. `onProcess` receives the
+ * per-dump stats once the dump is fully walked. URL→module classification is
+ * memoized across the whole walk.
+ *
+ * A read failure (e.g. a dump above Node's ~512MB string limit) means a healthy
+ * process produced data we cannot see — fail loud rather than silently degrading
+ * the baseline subtraction. Only parse failures (truncated dumps from crashed
+ * processes) are skippable, with a warning.
+ */
+function forEachExecutedFunction(
+  coverageDir: string,
+  onFunction: (hit: ExecutedFunctionHit) => void,
+  onProcess?: (stats: CoverageProcessStats) => void
+): void {
+  const repoRoot = getKibanaDir();
   const classifyCache = new Map<string, ClassifiedScript | null>();
   const classify = (url: string): ClassifiedScript | null => {
     const cached = classifyCache.get(url);
@@ -128,15 +151,7 @@ export function collectExecutedFunctions(coverageDir: string): CollectedCoverage
     return classified;
   };
 
-  const functions = new Map<string, ExecutedFunctionRecord>();
-  const browserFunctions = new Map<string, ExecutedFunctionRecord>();
-  const processes: CoverageProcessStats[] = [];
-
-  for (const coverageFile of coverageFiles) {
-    // A read failure (e.g. a dump above Node's ~512MB string limit) means a
-    // healthy process produced data we cannot see — fail loud rather than
-    // silently degrading the baseline subtraction. Only parse failures
-    // (truncated dumps from crashed processes) are skippable.
+  for (const coverageFile of listCoverageDumps(coverageDir)) {
     let raw: string;
     try {
       raw = fs.readFileSync(path.join(coverageDir, coverageFile), 'utf8');
@@ -160,7 +175,6 @@ export function collectExecutedFunctions(coverageDir: string): CollectedCoverage
         continue;
       }
       const { record, origin } = classified;
-      const target = origin === 'browser' ? browserFunctions : functions;
       repoScriptCount++;
 
       for (const fn of script.functions ?? []) {
@@ -169,15 +183,45 @@ export function collectExecutedFunctions(coverageDir: string): CollectedCoverage
           continue;
         }
         executedFunctionCount++;
-        const key = `${record.filePath}::${fn.functionName}::${ranges[0]?.startOffset ?? 0}`;
-        if (!target.has(key)) {
-          target.set(key, record);
-        }
+        const startOffset = ranges[0]?.startOffset ?? 0;
+        onFunction({
+          key: `${record.filePath}::${fn.functionName}::${startOffset}`,
+          record,
+          origin,
+          functionName: fn.functionName,
+          startOffset,
+        });
       }
     }
 
-    processes.push({ coverageFile, repoScriptCount, executedFunctionCount });
+    onProcess?.({ coverageFile, repoScriptCount, executedFunctionCount });
   }
+}
+
+/**
+ * Read every `coverage-*.json` in a `NODE_V8_COVERAGE` output directory and
+ * return the set of executed repo-owned functions, attributed to the `@kbn/`
+ * module that owns the file.
+ */
+export function collectExecutedFunctions(coverageDir: string): CollectedCoverage {
+  if (listCoverageDumps(coverageDir).length === 0) {
+    throw new Error(`No coverage-*.json files found in ${coverageDir}`);
+  }
+
+  const functions = new Map<string, ExecutedFunctionRecord>();
+  const browserFunctions = new Map<string, ExecutedFunctionRecord>();
+  const processes: CoverageProcessStats[] = [];
+
+  forEachExecutedFunction(
+    coverageDir,
+    ({ key, record, origin }) => {
+      const target = origin === 'browser' ? browserFunctions : functions;
+      if (!target.has(key)) {
+        target.set(key, record);
+      }
+    },
+    (stats) => processes.push(stats)
+  );
 
   return { functions, browserFunctions, processes };
 }
@@ -272,45 +316,13 @@ export function collectModuleFunctions(
   coverageDir: string,
   moduleId: string
 ): Map<string, FunctionDetail> {
-  const repoRoot = getKibanaDir();
-  const coverageFiles = fs
-    .readdirSync(coverageDir)
-    .filter((f) => f.startsWith('coverage-') && f.endsWith('.json'))
-    .sort();
-
   const found = new Map<string, FunctionDetail>();
-  for (const coverageFile of coverageFiles) {
-    let data: V8CoverageFile;
-    try {
-      data = JSON.parse(fs.readFileSync(path.join(coverageDir, coverageFile), 'utf8'));
-    } catch {
-      continue;
+  forEachExecutedFunction(coverageDir, ({ key, record, origin, functionName, startOffset }) => {
+    if (record.moduleId !== moduleId || found.has(key)) {
+      return;
     }
-    for (const script of data.result ?? []) {
-      const classified = classifyUrl(script.url, repoRoot);
-      if (!classified || classified.record.moduleId !== moduleId) {
-        continue;
-      }
-      const { record, origin } = classified;
-      for (const fn of script.functions ?? []) {
-        const ranges = fn.ranges ?? [];
-        if (!ranges.some((range) => range.count > 0)) {
-          continue;
-        }
-        const startOffset = ranges[0]?.startOffset ?? 0;
-        const key = `${record.filePath}::${fn.functionName}::${startOffset}`;
-        if (!found.has(key)) {
-          found.set(key, {
-            moduleId,
-            filePath: record.filePath,
-            functionName: fn.functionName,
-            startOffset,
-            origin,
-          });
-        }
-      }
-    }
-  }
+    found.set(key, { moduleId, filePath: record.filePath, functionName, startOffset, origin });
+  });
   return found;
 }
 

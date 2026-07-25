@@ -10,46 +10,14 @@
 /**
  * TEMPORARY overlay for Scout selective testing.
  *
- * The static @kbn/ dependency graph (kibana.jsonc + tsconfig kbn_references)
- * cannot model runtime registry coupling — e.g. ML registers actions into the
- * uiActions registry that Dashboard renders at run time, with no static import
- * edge between them. ML-only changes therefore do not mark Dashboard's Scout
- * tests as affected and registration races slip through.
- *
- * This overlay augments the affected-modules set with a small allowlist of
- * (patterns -> consumer @kbn/ IDs) entries when the corresponding publisher
- * files change.
+ * The rules live in `#pipeline-utils/scout_implicit_registry_consumers` (shared
+ * with the ftr-runtime-map harness that validates them); this module applies
+ * them to an affected-modules set.
  */
 
 import minimatch from 'minimatch';
 import type { ToolingLog } from '@kbn/tooling-log';
-
-interface ImplicitConsumerRule {
-  reason: string;
-  patterns: readonly string[];
-  consumers: readonly string[];
-}
-
-const IMPLICIT_REGISTRY_CONSUMERS: readonly ImplicitConsumerRule[] = [
-  {
-    reason: 'Runtime registry coupling not captured by static @kbn/ references.',
-    patterns: [
-      '**/plugins/**/public/embeddables/**/*.{ts,tsx}',
-      '**/plugins/**/public/embeddable/**/*.{ts,tsx}',
-      '**/plugins/**/public/react_embeddable/**/*.{ts,tsx}',
-      '**/plugins/**/public/apps/embeddables/**/*.{ts,tsx}',
-      '**/plugins/**/public/ui_actions/**/*.{ts,tsx}',
-      '**/plugins/**/public/trigger_actions/**/*.{ts,tsx}',
-      '**/plugins/**/public/**/actions/register*.{ts,tsx}',
-    ],
-    consumers: [
-      '@kbn/dashboard-plugin',
-      '@kbn/embeddable-plugin',
-      '@kbn/canvas-plugin',
-      '@kbn/lens-plugin',
-    ],
-  },
-];
+import { IMPLICIT_REGISTRY_CONSUMERS } from '#pipeline-utils/scout_implicit_registry_consumers';
 
 /**
  * Augment an affected-modules set with consumer @kbn/ IDs whose registries are

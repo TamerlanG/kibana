@@ -12,13 +12,9 @@
 const path = require('path');
 const parseArgs = require('minimist');
 
-require('ts-node').register({
-  transpileOnly: true,
-  compilerOptions: {
-    module: 'commonjs',
-  },
-  project: path.join(__dirname, '../../tsconfig.json'),
-});
+const { registerTsNode, rejectUnknownFlags, lastValue } = require(path.join(__dirname, './cli'));
+
+registerTsNode();
 
 const { summarizeFtrCoverage } = require(path.join(__dirname, './summarize'));
 const { printSummary, writeDetailJson } = require(path.join(__dirname, './report'));
@@ -46,7 +42,7 @@ function main() {
     boolean: ['help'],
     string: ['baseline', 'json'],
     alias: { h: 'help' },
-    unknown: rejectUnknownFlags,
+    unknown: rejectUnknownFlags(HELP_TEXT),
   });
 
   if (argv.help || argv._.length !== 1) {
@@ -69,21 +65,6 @@ function main() {
     console.error('Error summarizing coverage:', error.message);
     process.exit(1);
   }
-}
-
-/** Reject typo'd flags instead of silently ignoring them. */
-function rejectUnknownFlags(arg) {
-  if (arg.startsWith('-')) {
-    console.error(`Unknown flag: ${arg}\n`);
-    console.log(HELP_TEXT);
-    process.exit(1);
-  }
-  return true;
-}
-
-/** minimist turns repeated flags into arrays; keep the last occurrence. */
-function lastValue(value) {
-  return Array.isArray(value) ? value[value.length - 1] : value;
 }
 
 main();
