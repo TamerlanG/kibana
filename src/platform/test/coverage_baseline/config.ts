@@ -36,6 +36,14 @@ export default async function ({ readConfigFile }: FtrConfigProviderContext) {
   const settings = {
     ...target.getAll(),
     testFiles: [require.resolve('./tests/baseline')],
+    // Reset the target's suite-tag filters: they filter by tag against the
+    // target's own suites, and our untagged baseline suite would otherwise be
+    // filtered out entirely (e.g. targets that require @ess/@serverless),
+    // producing a silent empty browser baseline.
+    suiteTags: {
+      include: [],
+      exclude: [],
+    },
   };
   // a custom testRunner would take precedence over testFiles — the baseline
   // must run its own spec through the default runner
