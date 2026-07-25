@@ -42,15 +42,6 @@ One-shot (two FTR runs + summary, ~10 min for a small config):
   src/platform/test/api_integration/apis/unused_urls_task/config.ts
 ```
 
-Manual, if you want to control the runs yourself:
-
-```
-NODE_V8_COVERAGE=/tmp/ftr-cov/test-run node scripts/functional_tests --config <cfg>
-NODE_V8_COVERAGE=/tmp/ftr-cov/baseline node scripts/functional_tests --dry-run --config <cfg>
-.buildkite/pipeline-utils/ftr-runtime-map/summarize_coverage /tmp/ftr-cov/test-run \
-  --baseline /tmp/ftr-cov/baseline --json detail.json
-```
-
 Example output (unused_urls_task config, which tests the `share` plugin's
 unused-URLs cleanup task):
 
@@ -156,9 +147,6 @@ dependency closure of the config's owning module + the implicit-consumer
 overlay). It reports, per package: agree / under-selected (runtime ran it,
 static would skip — a correctness-risk candidate for a new overlay rule) /
 over-selected (static selects it, never ran) / harness, plus recall/precision.
-
-To re-run just the comparison on an already-recorded `packages.json` (no
-re-recording), use `compare_scout_selection --config <cfg> --runtime-json <file>`.
 
 ## Caveats
 

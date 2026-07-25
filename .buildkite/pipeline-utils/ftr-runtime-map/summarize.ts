@@ -299,59 +299,6 @@ function aggregateNewFunctions(
   return { rows, filesByModule, newFunctionCount };
 }
 
-export interface FunctionDetail {
-  moduleId: string;
-  filePath: string;
-  functionName: string;
-  startOffset: number;
-  origin: 'server' | 'browser';
-}
-
-/**
- * Function-level detail for a single module: every executed function attributed
- * to `moduleId`, keyed `<filePath>::<functionName>::<startOffset>`. Used by the
- * inspect drill-down to answer "exactly which functions of package X ran".
- */
-export function collectModuleFunctions(
-  coverageDir: string,
-  moduleId: string
-): Map<string, FunctionDetail> {
-  const found = new Map<string, FunctionDetail>();
-  forEachExecutedFunction(coverageDir, ({ key, record, origin, functionName, startOffset }) => {
-    if (record.moduleId !== moduleId || found.has(key)) {
-      return;
-    }
-    found.set(key, { moduleId, filePath: record.filePath, functionName, startOffset, origin });
-  });
-  return found;
-}
-
-/**
- * The functions of `moduleId` that executed in the run but not the baseline —
- * i.e. exactly what earns that module a place in the summary for this config.
- */
-export function inspectModule({
-  runDir,
-  baselineDir,
-  moduleId,
-}: {
-  runDir: string;
-  baselineDir?: string;
-  moduleId: string;
-}): FunctionDetail[] {
-  const run = collectModuleFunctions(runDir, moduleId);
-  const baseline = baselineDir ? collectModuleFunctions(baselineDir, moduleId) : new Map();
-  return [...run.entries()]
-    .filter(([key]) => !baseline.has(key))
-    .map(([, detail]) => detail)
-    .sort(
-      (a, b) =>
-        a.filePath.localeCompare(b.filePath) ||
-        a.startOffset - b.startOffset ||
-        a.functionName.localeCompare(b.functionName)
-    );
-}
-
 interface ClassifiedScript {
   record: ExecutedFunctionRecord;
   origin: 'server' | 'browser';

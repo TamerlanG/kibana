@@ -42,11 +42,13 @@ Two guarded blocks in the per-config `while read -r config` loop, gated on
    `export NODE_V8_COVERAGE=… FTR_BROWSER_COVERAGE_DIR=…` (absolute paths).
 2. **Summarize + delete + upload** (after the run, after `set -e`):
    `unset` both env vars first (else the summarizer's own node process dumps too),
-   run `summarize_coverage <dir> --ci-functions <out>.json.gz --config-path <config>
-   --exit-code $lastCode`, `rm -rf` the raw dumps, `buildkite-agent artifact upload`.
-   Every command `|| echo …` — collection can never change the step outcome.
-- **New summarizer mode `--ci-functions`**: calls `collectExecutedFunctions()` with NO
-  baseline and writes gzipped `{meta: {configPath, exitCode, jobId, recordedAt},
+   run the CI collection step (`ci_collect_functions <dir> --out <out>.json.gz
+   --config-path <config> --exit-code $lastCode`), `rm -rf` the raw dumps,
+   `buildkite-agent artifact upload`. Every command `|| echo …` — collection can
+   never change the step outcome.
+- **New CI collection step (`ci_collect_functions`)**: a CI-only entry point that
+  calls the shared `collectExecutedFunctions()` lib with NO baseline and writes
+  gzipped `{meta: {configPath, exitCode, jobId, recordedAt},
   server: {module: functionKeys[]}, browser: {…}}`. Function keys are cross-config
   comparable because every job runs the identical dist at the identical path
   (`KIBANA_BUILD_LOCATION`).
@@ -164,7 +166,7 @@ Insertion point: `pick_test_group_run_order.ts` inside the existing
    `.buildkite/pipeline-resource-definitions/kibana-ftr-runtime-map-daily.yml`
    (+ `locations.yml` via `scripts/fix-location-collection.ts`, validate with
    `scripts/validate-pipeline-definition.sh`); `ftr_configs.sh` guarded blocks;
-   `summarize_coverage --ci-functions` mode; `merge_runtime_map.ts`;
+   `ci_collect_functions` collection step; `merge_runtime_map.ts`;
    `commit_map.sh` publisher; `pull_requests.json` skip-CI entry.
    Exit: bot PR merges daily; measure size + day-over-day churn.
 2. **Shadow (~4 weeks)** — consumption wiring in shadow mode; measure escape rate

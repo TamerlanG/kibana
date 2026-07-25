@@ -10,8 +10,7 @@
 /**
  * Repo-derived glue around the pure `compareScoutSelection`: gathers a config's
  * static upstream closure and implicit-consumer overlay from the working tree,
- * runs the comparison, and prints it. Shared by `record_coverage` (Scout mode)
- * and the standalone `compare_scout_selection` CLI.
+ * runs the comparison, and prints it. Used by `record_coverage` (Scout mode).
  */
 
 import { execSync } from 'child_process';
