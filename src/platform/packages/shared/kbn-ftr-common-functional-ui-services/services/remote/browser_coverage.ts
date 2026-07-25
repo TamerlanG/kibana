@@ -40,8 +40,12 @@ interface V8ScriptCoverage {
  * user-visible way: every CDP/filesystem error is caught and logged.
  *
  * Precise coverage is armed per renderer process, so it is silently lost on
- * cross-process navigations — callers flush() before and start() after every
- * navigation (see BrowserService) and flush once more before the session quits.
+ * cross-process navigations — callers flush() before AND after every navigation
+ * (see BrowserService) and flush once more before the session quits. The
+ * post-navigation flush either captures the page-load execution (same-process
+ * navigation, profiler still armed) or fails on the un-armed swapped-in
+ * renderer, in which case it recovers the load-time execution via best-effort
+ * coverage and re-arms.
  */
 export class BrowserCoverageCollector {
   private seq = 0;
@@ -102,7 +106,8 @@ export class BrowserCoverageCollector {
   /**
    * Collect the coverage recorded since the last flush and append it as one
    * dump file. On failure (e.g. an un-armed target after a process swap) it
-   * re-arms so subsequent flushes on this target work.
+   * captures best-effort coverage — recovering the page-load execution precise
+   * coverage missed — and re-arms so subsequent flushes on this target work.
    */
   async flush(): Promise<void> {
     try {
@@ -110,16 +115,42 @@ export class BrowserCoverageCollector {
         'Profiler.takePreciseCoverage'
       )) as { result?: V8ScriptCoverage[] } | undefined;
 
-      const scripts = response?.result ?? [];
-      if (scripts.length === 0) {
-        return;
-      }
-
-      const fileName = `coverage-browser-${String(this.seq++).padStart(4, '0')}.json`;
-      Fs.writeFileSync(Path.join(this.coverageDir, fileName), JSON.stringify({ result: scripts }));
+      this.writeDump(response?.result ?? []);
     } catch (error) {
-      this.log.debug(`browser coverage: flush failed, re-arming: ${error}`);
+      this.log.debug(
+        `browser coverage: flush failed, capturing best-effort and re-arming: ${error}`
+      );
+      await this.captureBestEffort();
       await this.start();
     }
+  }
+
+  /**
+   * Fallback for targets where precise coverage was not armed during page load
+   * (a cross-process navigation swaps in a fresh renderer). V8 retains
+   * invocation data for functions still on the heap, so best-effort coverage
+   * recovers most of the load-time execution — module init, plugin
+   * registration — that precise coverage missed. May be incomplete (GC), which
+   * is acceptable for a which-modules-ran map.
+   */
+  private async captureBestEffort(): Promise<void> {
+    try {
+      await this.driver.sendDevToolsCommand('Profiler.enable');
+      const response = (await this.driver.sendAndGetDevToolsCommand(
+        'Profiler.getBestEffortCoverage'
+      )) as { result?: V8ScriptCoverage[] } | undefined;
+
+      this.writeDump(response?.result ?? []);
+    } catch (error) {
+      this.log.debug(`browser coverage: best-effort capture failed: ${error}`);
+    }
+  }
+
+  private writeDump(scripts: V8ScriptCoverage[]): void {
+    if (scripts.length === 0) {
+      return;
+    }
+    const fileName = `coverage-browser-${String(this.seq++).padStart(4, '0')}.json`;
+    Fs.writeFileSync(Path.join(this.coverageDir, fileName), JSON.stringify({ result: scripts }));
   }
 }

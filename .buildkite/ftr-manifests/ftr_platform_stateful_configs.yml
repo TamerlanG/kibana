@@ -3,6 +3,9 @@ disabled:
   - x-pack/platform/test/api_integration_deployment_agnostic/default_configs/stateful.config.base.ts
   - x-pack/platform/test/api_integration_deployment_agnostic/default_configs/feature_flag.stateful.config.base.ts
 
+  # Browser-coverage baseline wrapper, run only by ftr-runtime-map record_coverage
+  - src/platform/test/coverage_baseline/config.ts
+
   # Base config files, only necessary to inform config finding script
   - src/platform/test/functional/config.base.js
   - src/platform/test/functional/config.base.http2.ts

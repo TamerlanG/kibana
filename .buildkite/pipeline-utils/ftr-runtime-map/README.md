@@ -77,9 +77,12 @@ invisible to it. When the `FTR_BROWSER_COVERAGE_DIR` env var is set (which
 browser side too, using the same V8 coverage engine via the Chrome DevTools
 Protocol (`Profiler.takePreciseCoverage`):
 
-- Coverage is armed when the selenium session starts, flushed + re-armed around
-  every navigation (precise coverage is lost on cross-process navigations), and
-  flushed a final time before the browser quits.
+- Coverage is armed when the selenium session starts, flushed before AND after
+  every navigation, and flushed a final time before the browser quits. Precise
+  coverage is lost on cross-process navigations, so the post-navigation flush
+  self-heals: on an un-armed swapped-in renderer it recovers the page-load
+  execution via `Profiler.getBestEffortCoverage` (V8 retains invocation data
+  for functions still on the heap) and re-arms.
 - Dumps are written as `coverage-browser-<seq>.json` files in the same
   directory and layout as the Node dumps, so the summarizer parses them with
   the same code path.
@@ -101,8 +104,15 @@ Browser-coverage caveats:
   downstream expansion on the changed-files side this is the right granularity
   for test selection.
 - Coverage in extra tabs/windows opened by tests is not recorded, and
-  process-swap windows between flush and re-arm lose data — both under-collect,
-  never mis-attribute.
+  best-effort recovery after a process swap can miss functions whose feedback
+  data was GC'd — both under-collect, never mis-attribute.
+- For FTR **UI** configs the baseline is a login + home + idle run of the SAME
+  config's servers (via the `src/platform/test/coverage_baseline/config.ts`
+  wrapper and `FTR_BASELINE_TARGET_CONFIG`), so the plugin-registration
+  coverage every page load triggers is subtracted, like the Scout blank-page
+  baseline. If the wrapper cannot run a config (e.g. no `home` app registered),
+  `record_coverage` warns and falls back to the server-only `--dry-run`
+  baseline — browser rows then include page-load registration noise.
 - Each navigation pays one CDP flush round-trip (payloads can be MBs), only in
   recording runs.
 
@@ -129,9 +139,14 @@ For Scout **UI** configs the baseline is a blank-page run (log in + load a
 Kibana page + idle, via `test/scout/ui/baseline.playwright.config.ts`) so it
 captures the plugin-registration coverage every page load triggers — otherwise
 every UI plugin's `public` bundle looks test-exercised. Scout **API** configs
-use a server-only `start-server --exitAfterReady` baseline. The blank-page
-baseline uses the `default` server config set, so it is accurate for
-default-config-set UI configs (the common case).
+use a server-only `start-server --exitAfterReady` baseline.
+
+Scout derives the server config set from the config path (`/test/scout_<name>/`
+→ the `<name>` config set), so for custom-set UI targets `record_coverage`
+generates a throwaway `coverage_baseline.playwright.config.ts` next to the
+target config — booting the identical server config set — that runs the shared
+baseline spec, and deletes it after the run. Default-set targets use the shared
+baseline config directly.
 
 ### Runtime-vs-static comparison (Scout only, automatic)
 

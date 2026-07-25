@@ -249,7 +249,9 @@ class BrowserService extends FtrService {
    */
   public async get(url: string, insertTimestamp: boolean = true) {
     // precise coverage is lost on cross-process navigations: collect what the
-    // current page recorded, navigate, then re-arm on the new page
+    // current page recorded, navigate, then flush again — the post-navigation
+    // flush captures the page-load execution (or, on a swapped-in un-armed
+    // renderer, recovers it via best-effort coverage and re-arms)
     await this.coverage?.flush();
     if (insertTimestamp) {
       const urlWithTime = modifyUrl(url, (parsed) => {
@@ -261,7 +263,7 @@ class BrowserService extends FtrService {
     } else {
       await this.driver.get(url);
     }
-    await this.coverage?.start();
+    await this.coverage?.flush();
   }
 
   /**
@@ -434,7 +436,7 @@ class BrowserService extends FtrService {
   public async refresh() {
     await this.coverage?.flush();
     await this.driver.navigate().refresh();
-    await this.coverage?.start();
+    await this.coverage?.flush();
   }
 
   /**
@@ -446,7 +448,7 @@ class BrowserService extends FtrService {
   public async goBack() {
     await this.coverage?.flush();
     await this.driver.navigate().back();
-    await this.coverage?.start();
+    await this.coverage?.flush();
   }
 
   /**
@@ -458,7 +460,7 @@ class BrowserService extends FtrService {
   public async goForward() {
     await this.coverage?.flush();
     await this.driver.navigate().forward();
-    await this.coverage?.start();
+    await this.coverage?.flush();
   }
 
   /**
@@ -470,7 +472,7 @@ class BrowserService extends FtrService {
   public async navigateTo(url: string) {
     await this.coverage?.flush();
     await this.driver.navigate().to(url);
-    await this.coverage?.start();
+    await this.coverage?.flush();
   }
 
   /**

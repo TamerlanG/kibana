@@ -167,5 +167,39 @@ describe('BrowserCoverageCollector', () => {
         expect.anything()
       );
     });
+
+    it('recovers load-time execution via best-effort coverage on an un-armed target', async () => {
+      const driver = createFakeDriver();
+      const scripts = [{ url: 'http://localhost:5620/abc/bundles/core/core.entry.js' }];
+      // precise coverage was never started in the swapped-in renderer, but V8
+      // still retains invocation data for the functions that ran during load
+      driver.sendAndGetDevToolsCommand.mockImplementation(async (cmd: string) => {
+        if (cmd === 'Profiler.takePreciseCoverage') {
+          throw new Error('Precise coverage has not been started');
+        }
+        if (cmd === 'Profiler.getBestEffortCoverage') {
+          return { result: scripts };
+        }
+        throw new Error(`unexpected command ${cmd}`);
+      });
+      const collector = BrowserCoverageCollector.create({
+        driver,
+        browserType: Browsers.Chrome,
+        log,
+      })!;
+
+      await collector.flush();
+
+      const files = Fs.readdirSync(coverageDir);
+      expect(files).toEqual(['coverage-browser-0000.json']);
+      expect(JSON.parse(Fs.readFileSync(Path.join(coverageDir, files[0]), 'utf8'))).toEqual({
+        result: scripts,
+      });
+      // and the target is re-armed for subsequent precise flushes
+      expect(driver.sendDevToolsCommand).toHaveBeenCalledWith(
+        'Profiler.startPreciseCoverage',
+        expect.anything()
+      );
+    });
   });
 });
