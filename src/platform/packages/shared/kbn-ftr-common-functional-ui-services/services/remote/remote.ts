@@ -12,6 +12,7 @@ import type { FtrProviderContext } from '../ftr_provider_context';
 import type { BrowserConfig } from './webdriver';
 import { initWebDriver } from './webdriver';
 import { Browsers } from './browsers';
+import { BrowserCoverageCollector } from './browser_coverage';
 
 export async function RemoteProvider({ getService }: FtrProviderContext) {
   const lifecycle = getService('lifecycle');
@@ -56,6 +57,14 @@ export async function RemoteProvider({ getService }: FtrProviderContext) {
 
   const { driver, consoleLog$ } = await initWebDriver(log, browserType, lifecycle, browserConfig);
   const caps = await driver.getCapabilities();
+
+  // Opt-in browser code coverage recording (FTR_BROWSER_COVERAGE_DIR); used by
+  // .buildkite/pipeline-utils/ftr-runtime-map to map FTR configs to the
+  // browser-side plugins they exercise. Undefined unless explicitly enabled.
+  const coverage = BrowserCoverageCollector.create({ driver, browserType, log });
+  if (coverage) {
+    await coverage.start();
+  }
 
   log.info(`Remote initialized: ${caps.get('browserName')} ${caps.get('browserVersion')}}`);
 
@@ -113,9 +122,14 @@ export async function RemoteProvider({ getService }: FtrProviderContext) {
 
   lifecycle.cleanup.add(async () => {
     await tryWebDriverCall(async () => {
+      // cleanup handlers run shuffled and concurrently, so the final coverage
+      // flush must happen here, strictly before this handler quits the driver
+      if (coverage) {
+        await coverage.flush();
+      }
       await driver.quit();
     });
   });
 
-  return { driver, browserType, consoleLog$ };
+  return { driver, browserType, consoleLog$, coverage };
 }

@@ -10,9 +10,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { FtrCoverageSummary } from './summarize';
+import type { FtrCoverageSummary, ModuleCoverageRow } from './summarize';
 
-/** Print process stats to stderr and the module table to stdout. */
+/** Print process stats to stderr and the module tables to stdout. */
 export function printSummary(summary: FtrCoverageSummary): void {
   for (const proc of summary.processes) {
     console.error(
@@ -24,19 +24,43 @@ export function printSummary(summary: FtrCoverageSummary): void {
       `  baseline process ${proc.coverageFile}: repoScripts=${proc.repoScriptCount} executedFns=${proc.executedFunctionCount}`
     );
   }
+  const hasBaseline = summary.baselineProcesses !== undefined;
   console.error(
-    `  executed functions: run=${summary.totalRunFunctions}` +
-      (summary.totalBaselineFunctions !== undefined
+    `  executed server functions: run=${summary.totalRunFunctions}` +
+      (hasBaseline
         ? ` baseline=${summary.totalBaselineFunctions} new=${summary.newFunctionCount}`
         : '')
   );
+  if (summary.totalRunBrowserFunctions > 0) {
+    console.error(
+      `  executed browser functions: run=${summary.totalRunBrowserFunctions}` +
+        (hasBaseline
+          ? ` baseline=${summary.totalBaselineBrowserFunctions} new=${summary.newBrowserFunctionCount}`
+          : '')
+    );
+  }
 
-  const label = summary.baselineProcesses
-    ? 'modules with functions executed only in the test run'
-    : 'modules touched (no baseline subtracted)';
-  console.log(`\n=== ${label}: ${summary.rows.length} ===`);
+  printTable(
+    hasBaseline
+      ? 'server modules with functions executed only in the test run'
+      : 'server modules touched (no baseline subtracted)',
+    summary.rows
+  );
+
+  if (summary.totalRunBrowserFunctions > 0) {
+    printTable(
+      hasBaseline
+        ? 'browser modules with functions executed only in the test run'
+        : 'browser modules touched (no baseline subtracted)',
+      summary.browserRows
+    );
+  }
+}
+
+function printTable(label: string, rows: ModuleCoverageRow[]): void {
+  console.log(`\n=== ${label}: ${rows.length} ===`);
   console.log('functions  files  module');
-  for (const row of summary.rows) {
+  for (const row of rows) {
     console.log(
       `${String(row.functionCount).padStart(9)}  ${String(row.fileCount).padStart(5)}  ${
         row.moduleId
@@ -45,11 +69,23 @@ export function printSummary(summary: FtrCoverageSummary): void {
   }
 }
 
-/** Write `{ [moduleId]: filePaths[] }` for the post-subtraction functions. */
+/**
+ * Write per-module file lists for the post-subtraction functions. Flat
+ * `{ [moduleId]: filePaths[] }` when only server data exists; split into
+ * `{ server, browser }` sections when browser coverage was recorded.
+ */
 export function writeDetailJson(summary: FtrCoverageSummary, outFile: string): void {
-  const detail = Object.fromEntries(
-    [...summary.filesByModule.entries()].sort(([a], [b]) => a.localeCompare(b))
-  );
+  const toSortedObject = (filesByModule: Map<string, string[]>) =>
+    Object.fromEntries([...filesByModule.entries()].sort(([a], [b]) => a.localeCompare(b)));
+
+  const detail =
+    summary.totalRunBrowserFunctions > 0
+      ? {
+          server: toSortedObject(summary.filesByModule),
+          browser: toSortedObject(summary.browserFilesByModule),
+        }
+      : toSortedObject(summary.filesByModule);
+
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(outFile, JSON.stringify(detail, null, 2));
   console.error(`wrote ${outFile}`);

@@ -20,6 +20,7 @@ import sharp from 'sharp';
 import { APP_MAIN_SCROLL_CONTAINER_ID } from '@kbn/core-chrome-layout-constants';
 import { WebElementWrapper } from './web_element_wrapper';
 import { Browsers } from './remote/browsers';
+import type { BrowserCoverageCollector } from './remote/browser_coverage';
 import {
   NETWORK_PROFILES,
   type NetworkOptions,
@@ -46,7 +47,8 @@ class BrowserService extends FtrService {
   constructor(
     ctx: FtrProviderContext,
     public readonly browserType: string,
-    protected readonly driver: WebDriver | ChromiumWebDriver
+    protected readonly driver: WebDriver | ChromiumWebDriver,
+    private readonly coverage?: BrowserCoverageCollector
   ) {
     super(ctx);
     this.isFirefox = this.browserType === Browsers.Firefox;
@@ -246,15 +248,20 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async get(url: string, insertTimestamp: boolean = true) {
+    // precise coverage is lost on cross-process navigations: collect what the
+    // current page recorded, navigate, then re-arm on the new page
+    await this.coverage?.flush();
     if (insertTimestamp) {
       const urlWithTime = modifyUrl(url, (parsed) => {
         (parsed.query as any)._t = Date.now();
         return void 0;
       });
 
-      return await this.driver.get(urlWithTime);
+      await this.driver.get(urlWithTime);
+    } else {
+      await this.driver.get(url);
     }
-    return await this.driver.get(url);
+    await this.coverage?.start();
   }
 
   /**
@@ -425,7 +432,9 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async refresh() {
+    await this.coverage?.flush();
     await this.driver.navigate().refresh();
+    await this.coverage?.start();
   }
 
   /**
@@ -435,7 +444,9 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async goBack() {
+    await this.coverage?.flush();
     await this.driver.navigate().back();
+    await this.coverage?.start();
   }
 
   /**
@@ -445,7 +456,9 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async goForward() {
+    await this.coverage?.flush();
     await this.driver.navigate().forward();
+    await this.coverage?.start();
   }
 
   /**
@@ -455,7 +468,9 @@ class BrowserService extends FtrService {
    * @return {Promise<void>}
    */
   public async navigateTo(url: string) {
+    await this.coverage?.flush();
     await this.driver.navigate().to(url);
+    await this.coverage?.start();
   }
 
   /**
@@ -915,6 +930,6 @@ class BrowserService extends FtrService {
 }
 
 export async function BrowserProvider(ctx: FtrProviderContext) {
-  const { driver, browserType } = await ctx.getService('__webdriver__').init();
-  return new BrowserService(ctx, browserType, driver);
+  const { driver, browserType, coverage } = await ctx.getService('__webdriver__').init();
+  return new BrowserService(ctx, browserType, driver, coverage);
 }

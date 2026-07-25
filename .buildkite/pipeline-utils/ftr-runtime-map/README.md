@@ -69,6 +69,43 @@ does; also required locally for browser configs that need dist bundles), pass
 and baseline stay comparable. Dist file paths (`node_modules/@kbn/<id>/...`)
 are mapped to package ids automatically.
 
+## Browser coverage (UI configs)
+
+`NODE_V8_COVERAGE` only sees Node processes; client code executing in Chrome is
+invisible to it. When the `FTR_BROWSER_COVERAGE_DIR` env var is set (which
+`record_coverage` does automatically), the FTR webdriver layer records the
+browser side too, using the same V8 coverage engine via the Chrome DevTools
+Protocol (`Profiler.takePreciseCoverage`):
+
+- Coverage is armed when the selenium session starts, flushed + re-armed around
+  every navigation (precise coverage is lost on cross-process navigations), and
+  flushed a final time before the browser quits.
+- Dumps are written as `coverage-browser-<seq>.json` files in the same
+  directory and layout as the Node dumps, so the summarizer parses them with
+  the same code path.
+- Attribution: with the default (webpack) optimizer every plugin is its own
+  bundle, so the script URL names the plugin —
+  `…/bundles/plugin/<pluginId>/<version>/…` maps to the owning `@kbn/` module
+  via each `kibana.jsonc`'s `plugin.id`. `core`/`kbn-ui-shared-deps-*`/
+  `kbn-monaco` bundles map statically. Anything else under `bundles/` (e.g. the
+  opt-in `KBN_USE_RSPACK` unified build) degrades to `[browser-unattributed]`.
+- Results are reported as a separate "browser modules" table and a `browser`
+  section in the detail JSON.
+
+Browser-coverage caveats:
+
+- Chrome only; other browsers and remote selenium grids silently skip
+  collection (the run itself is unaffected).
+- Shared-package browser code compiles into each consuming plugin's bundle, so
+  browser rows name the consuming plugin, not the source package. Combined with
+  downstream expansion on the changed-files side this is the right granularity
+  for test selection.
+- Coverage in extra tabs/windows opened by tests is not recorded, and
+  process-swap windows between flush and re-arm lose data — both under-collect,
+  never mis-attribute.
+- Each navigation pays one CDP flush round-trip (payloads can be MBs), only in
+  recording runs.
+
 ## Caveats
 
 - Raw dumps are large (~200MB per run for a small config); `record_coverage`

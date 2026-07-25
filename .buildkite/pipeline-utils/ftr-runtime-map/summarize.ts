@@ -11,7 +11,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-import { findModuleForPath, UNCATEGORIZED_MODULE_ID } from '../affected-packages';
+import {
+  findModuleForPath,
+  findModuleForPluginId,
+  UNCATEGORIZED_MODULE_ID,
+} from '../affected-packages';
 import { getKibanaDir } from '../utils';
 
 /** Relevant subset of a `NODE_V8_COVERAGE` output file. */
@@ -46,8 +50,10 @@ interface ExecutedFunctionRecord {
 }
 
 export interface CollectedCoverage {
-  /** `<filePath>::<functionName>::<startOffset>` → owning module + file. */
+  /** `<filePath>::<functionName>::<startOffset>` → owning module + file (Node processes). */
   functions: Map<string, ExecutedFunctionRecord>;
+  /** Same shape for browser-side scripts (http(s) bundle URLs from CDP dumps). */
+  browserFunctions: Map<string, ExecutedFunctionRecord>;
   processes: CoverageProcessStats[];
 }
 
@@ -58,17 +64,34 @@ export interface ModuleCoverageRow {
 }
 
 export interface FtrCoverageSummary {
-  /** Modules with functions executed in the run (minus baseline), by functionCount desc. */
+  /** Server modules with functions executed in the run (minus baseline), by functionCount desc. */
   rows: ModuleCoverageRow[];
   /** Sorted file lists per module, for the same set of functions as `rows`. */
   filesByModule: Map<string, string[]>;
+  /** Browser-side modules (from CDP coverage of plugin bundles), same semantics as `rows`. */
+  browserRows: ModuleCoverageRow[];
+  browserFilesByModule: Map<string, string[]>;
   processes: CoverageProcessStats[];
   baselineProcesses?: CoverageProcessStats[];
   totalRunFunctions: number;
   totalBaselineFunctions?: number;
-  /** Functions executed in the run but not in the baseline. */
+  /** Server functions executed in the run but not in the baseline. */
   newFunctionCount: number;
+  totalRunBrowserFunctions: number;
+  totalBaselineBrowserFunctions?: number;
+  newBrowserFunctionCount: number;
 }
+
+/** Browser scripts under `/bundles/` that cannot be attributed to a module. */
+export const BROWSER_UNATTRIBUTED_MODULE_ID = '[browser-unattributed]';
+
+/** Non-plugin browser bundles with a fixed owning module. */
+const STATIC_BUNDLE_MODULES = new Map<string, string>([
+  ['core', '@kbn/core'],
+  ['kbn-ui-shared-deps-npm', '@kbn/ui-shared-deps-npm'],
+  ['kbn-ui-shared-deps-src', '@kbn/ui-shared-deps-src'],
+  ['kbn-monaco', '@kbn/monaco'],
+]);
 
 /**
  * Matches Kibana packages installed under node_modules, which is where every
@@ -94,18 +117,19 @@ export function collectExecutedFunctions(coverageDir: string): CollectedCoverage
     throw new Error(`No coverage-*.json files found in ${coverageDir}`);
   }
 
-  const classifyCache = new Map<string, ExecutedFunctionRecord | null>();
-  const classify = (url: string): ExecutedFunctionRecord | null => {
+  const classifyCache = new Map<string, ClassifiedScript | null>();
+  const classify = (url: string): ClassifiedScript | null => {
     const cached = classifyCache.get(url);
     if (cached !== undefined) {
       return cached;
     }
-    const record = classifyScriptUrl(url, repoRoot);
-    classifyCache.set(url, record);
-    return record;
+    const classified = classifyUrl(url, repoRoot);
+    classifyCache.set(url, classified);
+    return classified;
   };
 
   const functions = new Map<string, ExecutedFunctionRecord>();
+  const browserFunctions = new Map<string, ExecutedFunctionRecord>();
   const processes: CoverageProcessStats[] = [];
 
   for (const coverageFile of coverageFiles) {
@@ -131,10 +155,12 @@ export function collectExecutedFunctions(coverageDir: string): CollectedCoverage
     let executedFunctionCount = 0;
 
     for (const script of data.result ?? []) {
-      const record = classify(script.url);
-      if (!record) {
+      const classified = classify(script.url);
+      if (!classified) {
         continue;
       }
+      const { record, origin } = classified;
+      const target = origin === 'browser' ? browserFunctions : functions;
       repoScriptCount++;
 
       for (const fn of script.functions ?? []) {
@@ -144,8 +170,8 @@ export function collectExecutedFunctions(coverageDir: string): CollectedCoverage
         }
         executedFunctionCount++;
         const key = `${record.filePath}::${fn.functionName}::${ranges[0]?.startOffset ?? 0}`;
-        if (!functions.has(key)) {
-          functions.set(key, record);
+        if (!target.has(key)) {
+          target.set(key, record);
         }
       }
     }
@@ -153,7 +179,7 @@ export function collectExecutedFunctions(coverageDir: string): CollectedCoverage
     processes.push({ coverageFile, repoScriptCount, executedFunctionCount });
   }
 
-  return { functions, processes };
+  return { functions, browserFunctions, processes };
 }
 
 /**
@@ -172,12 +198,35 @@ export function summarizeFtrCoverage({
   const run = collectExecutedFunctions(runDir);
   const baseline = baselineDir ? collectExecutedFunctions(baselineDir) : undefined;
 
+  const server = aggregateNewFunctions(run.functions, baseline?.functions);
+  const browser = aggregateNewFunctions(run.browserFunctions, baseline?.browserFunctions);
+
+  return {
+    rows: server.rows,
+    filesByModule: server.filesByModule,
+    browserRows: browser.rows,
+    browserFilesByModule: browser.filesByModule,
+    processes: run.processes,
+    baselineProcesses: baseline?.processes,
+    totalRunFunctions: run.functions.size,
+    totalBaselineFunctions: baseline?.functions.size,
+    newFunctionCount: server.newFunctionCount,
+    totalRunBrowserFunctions: run.browserFunctions.size,
+    totalBaselineBrowserFunctions: baseline?.browserFunctions.size,
+    newBrowserFunctionCount: browser.newFunctionCount,
+  };
+}
+
+function aggregateNewFunctions(
+  runFunctions: Map<string, ExecutedFunctionRecord>,
+  baselineFunctions: Map<string, ExecutedFunctionRecord> | undefined
+): { rows: ModuleCoverageRow[]; filesByModule: Map<string, string[]>; newFunctionCount: number } {
   const functionCounts = new Map<string, number>();
   const fileSets = new Map<string, Set<string>>();
   let newFunctionCount = 0;
 
-  for (const [key, record] of run.functions) {
-    if (baseline?.functions.has(key)) {
+  for (const [key, record] of runFunctions) {
+    if (baselineFunctions?.has(key)) {
       continue;
     }
     newFunctionCount++;
@@ -203,14 +252,56 @@ export function summarizeFtrCoverage({
     filesByModule.set(moduleId, [...files].sort());
   }
 
+  return { rows, filesByModule, newFunctionCount };
+}
+
+interface ClassifiedScript {
+  record: ExecutedFunctionRecord;
+  origin: 'server' | 'browser';
+}
+
+function classifyUrl(url: string, repoRoot: string): ClassifiedScript | null {
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    const record = classifyBrowserScriptUrl(url);
+    return record ? { record, origin: 'browser' } : null;
+  }
+  const record = classifyScriptUrl(url, repoRoot);
+  return record ? { record, origin: 'server' } : null;
+}
+
+/**
+ * Attribute a browser script URL to a module. With the default (webpack)
+ * optimizer every plugin is served as its own bundle, so the URL names the
+ * plugin: `<basePath>/<buildSha>/bundles/plugin/<pluginId>/<version>/...`.
+ * The basePath/buildSha prefix is stripped so function keys align between the
+ * test run and the baseline. Non-bundle scripts (inline, bootstrap.js,
+ * third-party origins) are ignored; unknown bundle shapes (e.g. the opt-in
+ * rspack unified build) degrade to BROWSER_UNATTRIBUTED_MODULE_ID.
+ */
+function classifyBrowserScriptUrl(url: string): ExecutedFunctionRecord | null {
+  let pathname: string;
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    return null;
+  }
+
+  const bundlesIndex = pathname.indexOf('/bundles/');
+  if (bundlesIndex === -1) {
+    return null;
+  }
+  const filePath = pathname.slice(bundlesIndex + 1);
+  const [, kind, pluginId] = filePath.split('/');
+
+  if (kind === 'plugin') {
+    return {
+      moduleId: (pluginId && findModuleForPluginId(pluginId)) || BROWSER_UNATTRIBUTED_MODULE_ID,
+      filePath,
+    };
+  }
   return {
-    rows,
-    filesByModule,
-    processes: run.processes,
-    baselineProcesses: baseline?.processes,
-    totalRunFunctions: run.functions.size,
-    totalBaselineFunctions: baseline?.functions.size,
-    newFunctionCount,
+    moduleId: STATIC_BUNDLE_MODULES.get(kind) ?? BROWSER_UNATTRIBUTED_MODULE_ID,
+    filePath,
   };
 }
 
@@ -226,7 +317,7 @@ function classifyScriptUrl(url: string, repoRoot: string): ExecutedFunctionRecor
     return null;
   }
 
-  // Built-distribution layout: packages live under node_modules/@kbn/<id>.
+  // Built-distribution layout: Kibana packages live under node_modules/@kbn/<id>.
   const kbnPackage = absPath.match(KBN_NODE_MODULES_RE);
   if (kbnPackage) {
     return {
@@ -235,13 +326,18 @@ function classifyScriptUrl(url: string, repoRoot: string): ExecutedFunctionRecor
     };
   }
 
+  // Any remaining node_modules path is a non-@kbn third-party dependency and is
+  // not a Kibana package — drop it. This must check the whole path, not just a
+  // repo-root prefix: running against a dist build (--kibana-install-dir) nests
+  // deps under <installDir>/node_modules/... which can live inside the repo.
+  if (absPath.includes('/node_modules/')) {
+    return null;
+  }
+
   if (!absPath.startsWith(repoRoot + path.sep)) {
     return null;
   }
   const relPath = path.relative(repoRoot, absPath).split(path.sep).join('/');
-  if (relPath.startsWith('node_modules/')) {
-    return null;
-  }
 
   return {
     moduleId: findModuleForPath(relPath) ?? UNCATEGORIZED_MODULE_ID,

@@ -13,7 +13,7 @@ import { getAffectedProjectsMoon } from './strategy_moon';
 
 export * from './const';
 export * from './utils';
-export { findModuleForPath } from './module_lookup';
+export { findModuleForPath, findModuleForPluginId } from './module_lookup';
 export { listChangedFiles } from './strategy_git';
 export { getAffectedProjectsMoon } from './strategy_moon';
 

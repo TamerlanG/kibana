@@ -21,6 +21,7 @@ jest.mock('../utils', () => ({
 import {
   getModuleLookup,
   findModuleForPath,
+  findModuleForPluginId,
   getModuleDependencies,
   buildModuleDownstreamGraph,
   resetModuleLookupCache,
@@ -37,6 +38,7 @@ interface ModuleSpec {
   relDir: string;
   id: string;
   deps: string[];
+  pluginId?: string;
 }
 
 function createModule(root: string, spec: ModuleSpec): void {
@@ -47,11 +49,12 @@ function createModule(root: string, spec: ModuleSpec): void {
     path.join(dir, 'kibana.jsonc'),
     JSON.stringify(
       {
-        type: 'shared-common',
+        type: spec.pluginId ? 'plugin' : 'shared-common',
         id: spec.id,
         owner: '@elastic/test',
         group: 'platform',
         visibility: 'shared',
+        ...(spec.pluginId ? { plugin: { id: spec.pluginId } } : {}),
       },
       null,
       2
@@ -109,6 +112,7 @@ const MODULES: ModuleSpec[] = [
     relDir: 'plugins/my-plugin',
     id: '@kbn/my-plugin',
     deps: ['@kbn/core', '@kbn/utils'],
+    pluginId: 'myPlugin',
   },
 ];
 
@@ -281,6 +285,20 @@ describe('module_lookup', () => {
 
     it('handles backslash paths (Windows-style)', () => {
       expect(findModuleForPath('packages\\core\\src\\index.ts')).toBe('@kbn/core');
+    });
+  });
+
+  describe('findModuleForPluginId', () => {
+    it('maps a camelCase plugin id to its module id', () => {
+      expect(findModuleForPluginId('myPlugin')).toBe('@kbn/my-plugin');
+    });
+
+    it('returns undefined for unknown plugin ids', () => {
+      expect(findModuleForPluginId('nonExistentPlugin')).toBeUndefined();
+    });
+
+    it('does not index modules without a plugin id', () => {
+      expect(getModuleLookup().byPluginId.size).toBe(1);
     });
   });
 

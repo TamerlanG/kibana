@@ -10,6 +10,7 @@
 export {
   collectExecutedFunctions,
   summarizeFtrCoverage,
+  BROWSER_UNATTRIBUTED_MODULE_ID,
   type CollectedCoverage,
   type CoverageProcessStats,
   type FtrCoverageSummary,

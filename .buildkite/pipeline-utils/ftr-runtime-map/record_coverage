@@ -30,9 +30,12 @@ const HELP_TEXT = `
 Usage: record_coverage <ftr-config-path> [options]
 
 Record which @kbn/ modules an FTR config exercises at runtime. Runs the config
-twice with NODE_V8_COVERAGE — a normal test run, then a --dry-run boot
-baseline — and prints the modules whose functions executed only in the test
-run. Takes roughly two full FTR runs of the config (~10 min for a small one).
+twice — a normal test run, then a --dry-run boot baseline — and prints the
+modules whose functions executed only in the test run. Node processes (FTR
+runner + Kibana server) are recorded via NODE_V8_COVERAGE; for UI configs the
+Chrome side is recorded too (CDP precise coverage, attributed per plugin
+bundle) and reported as a separate "browser modules" table. Takes roughly two
+full FTR runs of the config (~10 min for a small one).
 
 Options:
   --out-dir <dir>             Working directory for dumps and results
@@ -55,7 +58,14 @@ function runFtr(kibanaDir, configPath, coverageDir, extraArgs) {
   const result = spawnSync('node', args, {
     cwd: kibanaDir,
     stdio: 'inherit',
-    env: { ...process.env, NODE_V8_COVERAGE: coverageDir },
+    // NODE_V8_COVERAGE records the Node processes (FTR runner + Kibana server);
+    // FTR_BROWSER_COVERAGE_DIR makes the FTR webdriver layer record the Chrome
+    // side via CDP into the same directory (coverage-browser-*.json files).
+    env: {
+      ...process.env,
+      NODE_V8_COVERAGE: coverageDir,
+      FTR_BROWSER_COVERAGE_DIR: coverageDir,
+    },
   });
   if (result.error) {
     throw new Error(`failed to spawn functional_tests: ${result.error.message}`);

@@ -23,6 +23,10 @@ export interface ModuleLookup {
    * `"@kbn/core-http-server-internal"` → `"src/core/packages/http/server-internal"`
    */
   byId: Map<string, string>;
+  /**
+   * camelCase `plugin.id` → module id, e.g. `"imageEmbeddable"` → `"@kbn/image-embeddable-plugin"`
+   */
+  byPluginId: Map<string, string>;
 }
 
 let cachedModuleLookup: ModuleLookup | null = null;
@@ -41,6 +45,7 @@ export function getModuleLookup(): ModuleLookup {
 
   const byDir = new Map<string, string>();
   const byId = new Map<string, string>();
+  const byPluginId = new Map<string, string>();
 
   for (const file of files) {
     if (file.includes('__fixtures__')) {
@@ -52,10 +57,13 @@ export function getModuleLookup(): ModuleLookup {
     if (config.id && typeof config.id === 'string') {
       byDir.set(dir, config.id);
       byId.set(config.id, dir);
+      if (config.plugin?.id && typeof config.plugin.id === 'string') {
+        byPluginId.set(config.plugin.id, config.id);
+      }
     }
   }
 
-  cachedModuleLookup = { byDir, byId };
+  cachedModuleLookup = { byDir, byId, byPluginId };
   return cachedModuleLookup;
 }
 
@@ -77,6 +85,11 @@ export function findModuleForPath(filePath: string): string | undefined {
   }
 
   return lookup.byDir.get(longestPrefix) || UNCATEGORIZED_MODULE_ID;
+}
+
+/** Resolve a camelCase plugin id (kibana.jsonc `plugin.id`) to its `@kbn/` module id. */
+export function findModuleForPluginId(pluginId: string): string | undefined {
+  return getModuleLookup().byPluginId.get(pluginId);
 }
 
 export function getModuleDependencies(moduleDir: string): string[] {
