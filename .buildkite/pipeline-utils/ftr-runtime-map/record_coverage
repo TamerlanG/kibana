@@ -14,8 +14,38 @@ const fs = require('fs');
 const { spawnSync } = require('child_process');
 const parseArgs = require('minimist');
 
-const { registerTsNode, rejectUnknownFlags, lastValue } = require(path.join(__dirname, './cli'));
+/** Register ts-node so the sibling `*.ts` modules can be required below. */
+function registerTsNode() {
+  require('ts-node').register({
+    transpileOnly: true,
+    compilerOptions: {
+      module: 'commonjs',
+    },
+    project: path.join(__dirname, '../../tsconfig.json'),
+  });
+}
 
+/**
+ * Build a minimist `unknown` handler that rejects typo'd flags instead of
+ * silently ignoring them (these runs cost ~20 min).
+ */
+function rejectUnknownFlags(helpText) {
+  return (arg) => {
+    if (arg.startsWith('-')) {
+      console.error(`Unknown flag: ${arg}\n`);
+      console.log(helpText);
+      process.exit(1);
+    }
+    return true;
+  };
+}
+
+/** minimist turns repeated flags into arrays; keep the last occurrence. */
+function lastValue(value) {
+  return Array.isArray(value) ? value[value.length - 1] : value;
+}
+
+// Must run before the sibling `*.ts` modules below are required.
 registerTsNode();
 
 const { getKibanaDir } = require(path.join(__dirname, '../utils'));
