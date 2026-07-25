@@ -239,7 +239,12 @@ function runScoutUiBaseline(kibanaDir, targetConfigPath, coverageDir, opts) {
   }
 }
 
-function runScoutUiBaselineConfig(kibanaDir, configPath, coverageDir, { installDir, arch, domain }) {
+function runScoutUiBaselineConfig(
+  kibanaDir,
+  configPath,
+  coverageDir,
+  { installDir, arch, domain }
+) {
   const args = [
     'scripts/scout',
     'run-tests',
@@ -348,6 +353,11 @@ function main() {
           `\n⚠️  FTR browser baseline failed (${error.message}); falling back to the ` +
             'server-only --dry-run baseline — browser rows will include page-load registration noise.\n'
         );
+        // Discard any partial dumps the failed attempt flushed (Kibana writes a
+        // dump on shutdown even on failure) so the fallback baseline is purely
+        // the --dry-run one, matching the message above.
+        fs.rmSync(baselineDir, { recursive: true, force: true });
+        fs.mkdirSync(baselineDir, { recursive: true });
         runFtr(kibanaDir, configPath, baselineDir, { installDir, dryRun: true });
       }
     } else {
