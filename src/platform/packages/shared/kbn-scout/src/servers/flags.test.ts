@@ -34,6 +34,7 @@ describe('parseServerFlags', () => {
       headed: false,
       logToFile: false,
       preserveEsData: false,
+      exitAfterReady: false,
       serverConfigSet: 'default',
     });
     const result = parseServerFlags(flags);
@@ -43,6 +44,7 @@ describe('parseServerFlags', () => {
       installDir: undefined,
       logsDir: undefined,
       preserveEsData: false,
+      exitAfterReady: false,
       serverConfigSet: 'default',
       testTarget: {
         arch: 'serverless',
@@ -60,6 +62,7 @@ describe('parseServerFlags', () => {
       esFrom: 'snapshot',
       logToFile: false,
       preserveEsData: false,
+      exitAfterReady: false,
       serverConfigSet: 'default',
     });
     const result = parseServerFlags(flags);
@@ -69,6 +72,7 @@ describe('parseServerFlags', () => {
       installDir: undefined,
       logsDir: undefined,
       preserveEsData: false,
+      exitAfterReady: false,
       serverConfigSet: 'default',
       testTarget: {
         arch: 'stateful',
@@ -85,6 +89,7 @@ describe('parseServerFlags', () => {
       domain: 'classic',
       logToFile: false,
       preserveEsData: false,
+      exitAfterReady: false,
       serverConfigSet: 'uiam_local',
     });
     const result = parseServerFlags(flags);
@@ -94,6 +99,7 @@ describe('parseServerFlags', () => {
       installDir: undefined,
       logsDir: undefined,
       preserveEsData: false,
+      exitAfterReady: false,
       serverConfigSet: 'uiam_local',
       testTarget: {
         arch: 'stateful',
@@ -110,6 +116,7 @@ describe('parseServerFlags', () => {
       domain: 'security_complete',
       logToFile: false,
       preserveEsData: true,
+      exitAfterReady: false,
       serverConfigSet: 'default',
     });
     const result = parseServerFlags(flags);
@@ -119,6 +126,7 @@ describe('parseServerFlags', () => {
       installDir: undefined,
       logsDir: undefined,
       preserveEsData: true,
+      exitAfterReady: false,
       serverConfigSet: 'default',
       testTarget: {
         arch: 'serverless',

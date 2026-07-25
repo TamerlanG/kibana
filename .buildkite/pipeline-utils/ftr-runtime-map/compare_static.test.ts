@@ -59,6 +59,21 @@ describe('compareScoutSelection', () => {
 
     expect(report.matrix.map((r) => r.packageId)).toEqual(['@kbn/dashboard-plugin']);
     expect(report.runtime.combined).toEqual(['@kbn/dashboard-plugin']);
+    // browser recording was ONLY the unattributed sentinel → flagged
+    expect(report.browserUnattributed).toBe(true);
+  });
+
+  it('does not flag browserUnattributed when the browser side has a real module', () => {
+    const report = compareScoutSelection({
+      owningModule: '@kbn/dashboard-plugin',
+      runtimeServer: set('@kbn/dashboard-plugin'),
+      // a real module alongside the sentinel → still partially usable, not flagged
+      runtimeBrowser: set('@kbn/lens-plugin', '[browser-unattributed]'),
+      staticClosure: set('@kbn/dashboard-plugin'),
+      overlayPublishers: set(),
+    });
+
+    expect(report.browserUnattributed).toBe(false);
   });
 
   it('computes recall/precision, excluding harness from effective recall', () => {

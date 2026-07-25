@@ -88,6 +88,15 @@ export interface ComparisonReport {
   overlayPublishers: string[];
   matrix: MatrixRow[];
   metrics: ComparisonMetrics;
+  /**
+   * Browser coverage WAS recorded but none of it could be attributed to a module
+   * (every browser script fell through to BROWSER_UNATTRIBUTED_MODULE_ID, which
+   * `clean()` drops — e.g. an rspack unified build). The metrics then reflect
+   * SERVER coverage only, so recall can read 100% while the browser side
+   * contributed no usable mapping. Callers should surface this rather than treat
+   * the run as fully attributed.
+   */
+  browserUnattributed: boolean;
   /** actionable list: runtime-only packages that are neither overlay- nor harness-covered. */
   underSelectedPackages: string[];
   /** overlay rules confirmed by runtime (runtime-only ∩ overlayPublishers). */
@@ -100,6 +109,10 @@ const clean = (set: ReadonlySet<string>): Set<string> =>
 export function compareScoutSelection(input: ComparisonInput): ComparisonReport {
   const server = clean(input.runtimeServer);
   const browser = clean(input.runtimeBrowser);
+  // Browser scripts were recorded but every one degraded to the unattributed
+  // sentinel (dropped by clean()), so the browser side maps to nothing usable.
+  const browserUnattributed =
+    input.runtimeBrowser.has(BROWSER_UNATTRIBUTED_MODULE_ID) && browser.size === 0;
   const runtime = new Set([...server, ...browser]);
   const closure = clean(input.staticClosure);
   const overlay = clean(input.overlayPublishers);
@@ -167,6 +180,7 @@ export function compareScoutSelection(input: ComparisonInput): ComparisonReport 
     overlayPublishers: [...overlay].sort(),
     matrix,
     metrics,
+    browserUnattributed,
     underSelectedPackages,
     overlayRediscoveredPackages,
   };

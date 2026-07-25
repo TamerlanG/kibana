@@ -186,6 +186,16 @@ Artifacts: ~0.5–2 GB gz function summaries per build + ~5 MB map.
 3. **Consumer fail-open contract** — ALL safety lives in the consumer rules
    (`bootNoisePackages` → run-all; unknown → run-all). Treat manifest fields as a
    versioned contract; "not in map" must NEVER mean "skip".
+4. **Statistical-subtraction under-selection (D3)** — a package with one ≥90%-frequent
+   function (subtracted as noise) AND one rare function (retained) is NOT placed in
+   `bootNoisePackages` (it has a surviving function *somewhere*), yet in the configs
+   where only its common function executed it has zero survivors and drops out of
+   those configs' maps. A change to that package would then wrongly skip those
+   configs, and the `bootNoisePackages` fail-open net does not catch it. The
+   safety argument in D3 assumes noise is subtracted at package granularity, but
+   subtraction is per-function — so "package survives somewhere" ≠ "package attributed
+   everywhere it ran". Resolve before implementing D3 (e.g. per-config survivor check,
+   or conservatively treat any package with a subtracted function as run-all).
 
 ## Open questions for kibana-operations
 1. OK to add the guarded blocks to shared `ftr_configs.sh`? (Alternative: fork the

@@ -86,6 +86,12 @@ export function printScoutComparison(report: ComparisonReport): void {
       `(server ${report.runtime.server.length}, browser ${report.runtime.browser.length})`
   );
   console.log(`static closure: ${report.staticClosure.length} pkgs`);
+  if (report.browserUnattributed) {
+    console.log(
+      '⚠ browser coverage was recorded but none of it could be attributed to a module ' +
+        '(e.g. an rspack unified build) — the metrics below reflect SERVER coverage only'
+    );
+  }
   console.log('');
   console.log(`agree:                 ${m.agree}`);
   console.log(`under-selected:        ${m.underSelected}  (runtime-only, static would SKIP)`);
