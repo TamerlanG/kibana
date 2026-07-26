@@ -88,6 +88,10 @@ Options:
   --arch <arch>               (Scout only) Server architecture [default: stateful]
   --domain <domain>           (Scout only) Server domain [default: classic]
   --keep-raw                  Keep raw V8 dumps (~hundreds of MB) after summarizing
+  --verbose                   List the exact functions executed per module (grouped
+                              by file). An entry of "<module-init>" is the module's
+                              top-level wrapper — a module whose only entries are
+                              "<module-init>" was just loaded, not test-exercised.
   --help, -h                  Show this help message
 
 Examples:
@@ -318,7 +322,7 @@ function compareScoutIfPossible(configPath, summary) {
 
 function main() {
   const argv = parseArgs(process.argv.slice(2), {
-    boolean: ['help', 'keep-raw'],
+    boolean: ['help', 'keep-raw', 'verbose'],
     string: ['out-dir', 'json', 'kibana-install-dir', 'arch', 'domain'],
     alias: { h: 'help' },
     unknown: rejectUnknownFlags(HELP_TEXT),
@@ -384,7 +388,7 @@ function main() {
       );
     }
 
-    printSummary(summary);
+    printSummary(summary, { verbose: Boolean(argv.verbose) });
     writeDetailJson(summary, jsonPath);
 
     if (isScout) {

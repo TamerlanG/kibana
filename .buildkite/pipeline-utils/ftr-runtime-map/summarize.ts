@@ -68,14 +68,25 @@ export interface ModuleCoverageRow {
   fileCount: number;
 }
 
+/** One executed function, for the `--verbose` per-module listing. */
+export interface ModuleFunctionDetail {
+  filePath: string;
+  /** V8 function name; `''` is the module's top-level wrapper (i.e. load/init). */
+  functionName: string;
+  startOffset: number;
+}
+
 export interface FtrCoverageSummary {
   /** Server modules with functions executed in the run (minus baseline), by functionCount desc. */
   rows: ModuleCoverageRow[];
   /** Sorted file lists per module, for the same set of functions as `rows`. */
   filesByModule: Map<string, string[]>;
+  /** Sorted per-function detail per module (for `--verbose`), same function set as `rows`. */
+  functionsByModule: Map<string, ModuleFunctionDetail[]>;
   /** Browser-side modules (from CDP coverage of plugin bundles), same semantics as `rows`. */
   browserRows: ModuleCoverageRow[];
   browserFilesByModule: Map<string, string[]>;
+  browserFunctionsByModule: Map<string, ModuleFunctionDetail[]>;
   processes: CoverageProcessStats[];
   baselineProcesses?: CoverageProcessStats[];
   totalRunFunctions: number;
@@ -248,8 +259,10 @@ export function summarizeFtrCoverage({
   return {
     rows: server.rows,
     filesByModule: server.filesByModule,
+    functionsByModule: server.functionsByModule,
     browserRows: browser.rows,
     browserFilesByModule: browser.filesByModule,
+    browserFunctionsByModule: browser.functionsByModule,
     processes: run.processes,
     baselineProcesses: baseline?.processes,
     totalRunFunctions: run.functions.size,
@@ -264,9 +277,15 @@ export function summarizeFtrCoverage({
 function aggregateNewFunctions(
   runFunctions: Map<string, ExecutedFunctionRecord>,
   baselineFunctions: Map<string, ExecutedFunctionRecord> | undefined
-): { rows: ModuleCoverageRow[]; filesByModule: Map<string, string[]>; newFunctionCount: number } {
+): {
+  rows: ModuleCoverageRow[];
+  filesByModule: Map<string, string[]>;
+  functionsByModule: Map<string, ModuleFunctionDetail[]>;
+  newFunctionCount: number;
+} {
   const functionCounts = new Map<string, number>();
   const fileSets = new Map<string, Set<string>>();
+  const functionsByModule = new Map<string, ModuleFunctionDetail[]>();
   let newFunctionCount = 0;
 
   for (const [key, record] of runFunctions) {
@@ -281,6 +300,13 @@ function aggregateNewFunctions(
       fileSets.set(record.moduleId, files);
     }
     files.add(record.filePath);
+
+    let details = functionsByModule.get(record.moduleId);
+    if (!details) {
+      details = [];
+      functionsByModule.set(record.moduleId, details);
+    }
+    details.push(parseFunctionKey(key, record.filePath));
   }
 
   const rows: ModuleCoverageRow[] = [...functionCounts.entries()]
@@ -296,7 +322,32 @@ function aggregateNewFunctions(
     filesByModule.set(moduleId, [...files].sort());
   }
 
-  return { rows, filesByModule, newFunctionCount };
+  for (const details of functionsByModule.values()) {
+    details.sort(
+      (a, b) =>
+        a.filePath.localeCompare(b.filePath) ||
+        a.startOffset - b.startOffset ||
+        a.functionName.localeCompare(b.functionName)
+    );
+  }
+
+  return { rows, filesByModule, functionsByModule, newFunctionCount };
+}
+
+/**
+ * Recover the per-function detail from a function key
+ * (`<filePath>::<functionName>::<startOffset>`). The `filePath` is known, so it
+ * is stripped from the front and the numeric `startOffset` split off the end;
+ * whatever remains is the (possibly empty) function name.
+ */
+function parseFunctionKey(key: string, filePath: string): ModuleFunctionDetail {
+  const rest = key.slice(filePath.length + 2);
+  const sep = rest.lastIndexOf('::');
+  return {
+    filePath,
+    functionName: rest.slice(0, sep),
+    startOffset: Number(rest.slice(sep + 2)),
+  };
 }
 
 interface ClassifiedScript {
