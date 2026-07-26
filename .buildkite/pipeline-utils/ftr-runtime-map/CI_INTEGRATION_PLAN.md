@@ -4,6 +4,19 @@
 > "Daily CI collection" section of `README.md` for the file map. Stages 2-3
 > (shadow consumption, enforce) are not implemented. Implementation deviations
 > from this plan:
+> - **Storage is a GCS bucket, not the committed-JSON bot PR of D5**:
+>   `gs://kibana-ci-ftr-runtime-map/<branch>/latest.json` + dated history
+>   copies, following the `kibana-ci-es-snapshots-daily` manifest pattern
+>   (`activate_service_account.sh` + `gsutil cp` with no-cache headers). This
+>   drops the kibanamachine auto-merge PR, the branch-protection question, the
+>   `pull_requests.json` skip-CI entry, and daily repo churn, at the cost of
+>   selection inputs no longer living in the checked-out tree (rebuilds of one
+>   commit may read a newer map; consumers must log the map's
+>   `generatedAt`/`collectionBuild` for debuggability). D5's rejection analysis
+>   below predates this switch and never evaluated a plain GCS object — its
+>   arguments against a *live service* in the decision path apply weakly to a
+>   static object read with fail-open, and `pick_test_group_run_order` already
+>   depends on the ci-stats HTTP API.
 > - The merge step runs after a `wait: continue_on_failure: true` instead of
 >   `depends_on: ftr-configs` + `allow_dependency_failure` — same semantics,
 >   but robust when the dynamically-uploaded FTR group is empty or renamed.
@@ -20,9 +33,9 @@
 > `17886cb1c87b` (server side) and `7cbc4418cba3` (browser side) on branch
 > `selective-ftr-runtime-map` — see `README.md` here.
 >
-> ⚠️ Touches shared CI infra (`ftr_configs.sh`, a new scheduled pipeline, a bot PR,
-> `pull_requests.json`) — get kibana-operations buy-in before landing. Open questions
-> for them are at the bottom.
+> ⚠️ Touches shared CI infra (`ftr_configs.sh`, a new scheduled pipeline, a new GCS
+> bucket) — get kibana-operations buy-in before landing. Open questions for them are
+> at the bottom.
 
 ## Goal
 
@@ -108,6 +121,11 @@ Step config: `depends_on` the FTR group key with `allow_dependency_failure: true
 (map still produced on red days), `timeout_in_minutes: 120`.
 
 ### D5. Storage: single committed JSON via daily auto-merge bot PR
+> **SUPERSEDED at implementation time** — storage is a GCS bucket
+> (`gs://kibana-ci-ftr-runtime-map/<branch>/latest.json` + `history/` copies,
+> via `publish_map.sh`); see the status header for the rationale. Kept as the
+> original design record; the rejected-alternatives analysis below remains valid.
+
 `.buildkite/ftr-runtime-map/runtime_map.json` (NOTE: **not** under
 `pipeline-utils/ci-stats/...` or `ftr-manifests/` — those are FTR_CRITICAL_PATHS and
 would force full runs on every map refresh).
@@ -180,8 +198,9 @@ Insertion point: `pick_test_group_run_order.ts` inside the existing
    (+ `locations.yml` via `scripts/fix-location-collection.ts`, validate with
    `scripts/validate-pipeline-definition.sh`); `ftr_configs.sh` guarded blocks;
    `ci_collect_functions` collection step; `merge_runtime_map.ts`;
-   `commit_map.sh` publisher; `pull_requests.json` skip-CI entry.
-   Exit: bot PR merges daily; measure size + day-over-day churn.
+   `publish_map.sh` GCS publisher (bucket `kibana-ci-ftr-runtime-map`).
+   Exit: `latest.json` refreshes daily; measure size + day-over-day churn
+   (diff two `history/` copies).
 2. **Shadow (~4 weeks)** — consumption wiring in shadow mode; measure escape rate
    (config genuinely failed AND would have been skipped, flakes excluded) and skip rate.
    Exit gates: miss-rate ≈ 0; median PR skips > 40% of configs.
@@ -215,10 +234,14 @@ Artifacts: ~0.5–2 GB gz function summaries per build + ~5 MB map.
 ## Open questions for kibana-operations
 1. OK to add the guarded blocks to shared `ftr_configs.sh`? (Alternative: fork the
    script for this pipeline — drift risk.)
-2. Can a skip-CI'd bot PR auto-merge under branch protection? (Docs-only PRs do today.)
+2. Provision the `kibana-ci-ftr-runtime-map` GCS bucket (same
+   `activate_service_account.sh` access model as `kibana-ci-es-snapshots-daily`):
+   write for the daily pipeline, read for PR agents at
+   `pick_test_group_run_order` time — or public-read like the ES snapshot
+   manifests? Lifecycle rule for `history/` (e.g. delete after 90 days)?
 3. Agent budget approval for the daily pipeline (~$10–30/day spot).
 4. Who owns the pipeline + Slack alert channel (#kibana-operations-alerts suggested).
-5. Long-term: interest in ci-stats growing a map/KV endpoint (would replace the bot PR)?
+5. Long-term: interest in ci-stats growing a map/KV endpoint (would replace the bucket)?
 
 ## Full design records
 The two detailed design documents (storage comparison table incl. ES/ci-stats

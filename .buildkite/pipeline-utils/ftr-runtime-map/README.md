@@ -27,11 +27,13 @@ runs every enabled FTR config against a dist build and publishes the merged map:
    ≥90% of successfully-collected configs is subtracted; packages left with no
    surviving function anywhere in a flavor are published as
    `bootNoisePackages`, which consumers must treat as "run everything".
-3. `commit_map.sh` publishes `.buildkite/ftr-runtime-map/runtime_map.json` via
-   a kibanamachine auto-merge PR (skip-CI'd through `pull_requests.json`).
-   Configs that produced no green summary are carried from the previous map for
-   up to 14 days, then marked `failed`; consumers must always run
-   failed/unmapped configs.
+3. `publish_map.sh` uploads the map to GCS (es-snapshots manifest pattern):
+   `gs://kibana-ci-ftr-runtime-map/<branch>/latest.json` is the live, no-cache
+   pointer consumers read, plus an immutable `<branch>/history/<stamp>.json`
+   copy per run for auditing/churn diffing (bucket override:
+   `FTR_RUNTIME_MAP_GCS_BUCKET`). Configs that produced no green summary are
+   carried from the previous `latest.json` for up to 14 days, then marked
+   `failed`; consumers must always run failed/unmapped configs.
 
 ## Why runtime instead of static analysis
 

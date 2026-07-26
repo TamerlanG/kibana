@@ -10,7 +10,10 @@
 /**
  * Final step of the daily `kibana-ftr-runtime-map` pipeline: download every
  * per-config coverage summary the FTR jobs uploaded, subtract per-stratum boot
- * noise, and write the committed map for `commit_map.sh` to publish.
+ * noise, and write the map for `publish_map.sh` to upload to GCS. The previous
+ * map (for `carried` entries) is downloaded from the bucket by the step wrapper
+ * (`merge_and_publish.sh`) before this script runs — GCS access stays in shell,
+ * file paths are the only contract here.
  *
  * The summaries are re-read once per pass instead of held in memory — the full
  * build's function keys are ~10^8 string instances, far beyond the heap, while
@@ -43,7 +46,8 @@ import { loadFtrStrata } from '../../../pipeline-utils/ftr-runtime-map/strata';
 import { getKibanaDir } from '../../../pipeline-utils/utils';
 
 const SUMMARIES_DIR = 'target/ftr-runtime-map/summaries';
-const MAP_PATH = '.buildkite/ftr-runtime-map/runtime_map.json';
+const OUT_PATH = 'target/ftr-runtime-map/runtime_map.json';
+const PREVIOUS_MAP_PATH = 'target/ftr-runtime-map/previous_map.json';
 
 function tryExec(cmd: string): boolean {
   try {
@@ -61,11 +65,11 @@ function annotate(message: string, style: 'info' | 'warning'): void {
   );
 }
 
-function readPreviousMap(mapAbsPath: string): RuntimeMap | undefined {
+function readPreviousMap(previousMapAbsPath: string): RuntimeMap | undefined {
   try {
-    return JSON.parse(fs.readFileSync(mapAbsPath, 'utf8')) as RuntimeMap;
+    return JSON.parse(fs.readFileSync(previousMapAbsPath, 'utf8')) as RuntimeMap;
   } catch (error) {
-    console.warn(`No usable previous map at ${mapAbsPath}: ${error}`);
+    console.warn(`No usable previous map at ${previousMapAbsPath} — nothing will be carried.`);
     return undefined;
   }
 }
@@ -86,7 +90,7 @@ function forEachWinnerSummary(
 function main(): void {
   const kibanaDir = getKibanaDir();
   const summariesDir = path.join(kibanaDir, SUMMARIES_DIR);
-  const mapAbsPath = path.join(kibanaDir, MAP_PATH);
+  const outAbsPath = path.join(kibanaDir, OUT_PATH);
 
   console.log('--- Downloading per-config coverage summaries');
   fs.mkdirSync(summariesDir, { recursive: true });
@@ -152,7 +156,7 @@ function main(): void {
     enabledConfigs,
     okConfigs,
     failedHeads,
-    previousMap: readPreviousMap(mapAbsPath),
+    previousMap: readPreviousMap(path.join(kibanaDir, PREVIOUS_MAP_PATH)),
     branch: process.env.BUILDKITE_BRANCH || 'main',
     commit: process.env.BUILDKITE_COMMIT || 'unknown',
     generatedAt: new Date().toISOString(),
@@ -162,19 +166,19 @@ function main(): void {
     },
   });
 
-  fs.mkdirSync(path.dirname(mapAbsPath), { recursive: true });
-  fs.writeFileSync(mapAbsPath, formatRuntimeMap(map));
+  fs.mkdirSync(path.dirname(outAbsPath), { recursive: true });
+  fs.writeFileSync(outAbsPath, formatRuntimeMap(map));
 
   const { status, enabled, ok, carried, failed } = map.collection;
   const summaryLine =
     `FTR runtime map: ${status} — ${ok}/${enabled} collected, ` +
     `${carried} carried, ${failed} failed/missing, ` +
-    `${map.packages.length} packages (${Math.round(fs.statSync(mapAbsPath).size / 1024)} KiB)`;
+    `${map.packages.length} packages (${Math.round(fs.statSync(outAbsPath).size / 1024)} KiB)`;
   console.log(summaryLine);
   annotate(summaryLine, status === 'complete' ? 'info' : 'warning');
 
   if (process.env.BUILDKITE_JOB_ID) {
-    tryExec(`cd ${JSON.stringify(kibanaDir)} && buildkite-agent artifact upload ${MAP_PATH}`);
+    tryExec(`cd ${JSON.stringify(kibanaDir)} && buildkite-agent artifact upload ${OUT_PATH}`);
   }
 }
 

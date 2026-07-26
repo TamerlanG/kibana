@@ -10,7 +10,7 @@
 /**
  * Pure logic for the daily runtime-map merge step: dedup per-config summaries,
  * statistical boot-noise subtraction per manifest stratum, and assembly of the
- * committed `runtime_map.json`.
+ * published `runtime_map.json`.
  *
  * ## Noise subtraction model
  *
@@ -249,7 +249,7 @@ export interface AssembleRuntimeMapInputs {
 }
 
 /**
- * Assemble the committed map: intern packages, compute per-flavor boot-noise
+ * Assemble the published map: intern packages, compute per-flavor boot-noise
  * packages from the fresh ok set, and fill non-collected configs from the
  * previous map (`carried`, age-capped) or as `failed` (consumers always run
  * failed/unmapped configs — "not in the map" must never mean "skip").
@@ -446,9 +446,9 @@ function computeBootNoisePackages(
 }
 
 /**
- * Serialize the map with one line per package / per config entry so the daily
- * bot-PR diff stays reviewable and day-over-day churn is measurable in changed
- * lines. Output is plain JSON.
+ * Serialize the map with one line per package / per config entry so two
+ * history copies from the bucket diff cleanly and day-over-day churn is
+ * measurable in changed lines. Output is plain JSON.
  */
 export function formatRuntimeMap(map: RuntimeMap): string {
   const lines: string[] = ['{'];

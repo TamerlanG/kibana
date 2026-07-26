@@ -76,9 +76,10 @@ steps:
   - wait: ~
     continue_on_failure: true
 
-  # Merge every uploaded coverage summary into the committed runtime map and
-  # publish it as an auto-merge bot PR. Runs on red days too — the map is
-  # still refreshed for the configs that did collect (fail-open elsewhere).
+  # Merge every uploaded coverage summary into the runtime map and publish it
+  # to the GCS bucket (<branch>/latest.json + a dated history copy). Runs on
+  # red days too — the map is still refreshed for the configs that did collect
+  # (fail-open elsewhere).
   - command: .buildkite/scripts/steps/ftr_runtime_map/merge_and_publish.sh
     label: Merge and publish FTR runtime map
     agents:
