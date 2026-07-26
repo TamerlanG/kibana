@@ -1,11 +1,24 @@
 # FTR Runtime Map — CI Integration Plan
 
-> Status: **design approved locally, not implemented**. This doc is the handoff for a
-> future session to implement. It assumes the local tooling in this directory
-> (summarize/record_coverage + the browser CDP collector in
-> `kbn-ftr-common-functional-ui-services`) is committed and working — see commits
+> Status: **stage 1 (collection + publish) implemented on this branch** — see the
+> "Daily CI collection" section of `README.md` for the file map. Stages 2-3
+> (shadow consumption, enforce) are not implemented. Implementation deviations
+> from this plan:
+> - The merge step runs after a `wait: continue_on_failure: true` instead of
+>   `depends_on: ftr-configs` + `allow_dependency_failure` — same semantics,
+>   but robust when the dynamically-uploaded FTR group is empty or renamed.
+> - Risk 4 below is resolved as **accept + measure**: any "sound" package-level
+>   fix collapses to run-all for every boot-loaded plugin (their
+>   setup/registration functions execute in ~every config of a stratum), which
+>   erases the selection signal. The residual under-selection must be bounded
+>   empirically by the stage-2 shadow-mode escape rate before enforcement; the
+>   full-suite on-merge pipeline remains the permanent backstop. Rationale in
+>   `merge_lib.ts`'s module docblock.
+>
+> The local tooling this builds on (summarize/record_coverage + the browser CDP
+> collector in `kbn-ftr-common-functional-ui-services`) landed in commits
 > `17886cb1c87b` (server side) and `7cbc4418cba3` (browser side) on branch
-> `selective-ftr-runtime-map`, plus `README.md` here.
+> `selective-ftr-runtime-map` — see `README.md` here.
 >
 > ⚠️ Touches shared CI infra (`ftr_configs.sh`, a new scheduled pipeline, a bot PR,
 > `pull_requests.json`) — get kibana-operations buy-in before landing. Open questions

@@ -99,6 +99,19 @@ while read -r config; do
   """
   fi
 
+  # Arm runtime-coverage recording for this config (daily kibana-ftr-runtime-map
+  # pipeline). Node processes dump V8 coverage via NODE_V8_COVERAGE; the FTR
+  # webdriver layer records Chrome the same way when FTR_BROWSER_COVERAGE_DIR is
+  # set. Paths must be absolute: children resolve them against their own cwd.
+  if [[ "${FTR_RUNTIME_MAP_ENABLED:-}" =~ ^(1|true)$ ]]; then
+    runtimeMapSlug="${config//[^a-zA-Z0-9_-]/_}"
+    runtimeMapDumpDir="$(pwd)/target/ftr-runtime-map/dumps/${runtimeMapSlug}"
+    rm -rf "$runtimeMapDumpDir"
+    mkdir -p "$runtimeMapDumpDir"
+    export NODE_V8_COVERAGE="$runtimeMapDumpDir"
+    export FTR_BROWSER_COVERAGE_DIR="$runtimeMapDumpDir"
+  fi
+
   # prevent non-zero exit code from breaking the loop
   set +e;
   node ./scripts/functional_tests \
@@ -109,6 +122,26 @@ while read -r config; do
     "$EXTRA_ARGS"
   lastCode=$?
   set -e;
+
+  # Summarize + upload the runtime-coverage dumps, then delete them (one dump
+  # set on disk at a time — a full build's dumps would fill the agent). Every
+  # command is failure-tolerant: coverage collection must never change the
+  # outcome of the test step. The env vars are unset FIRST so the summarizer's
+  # own node process (and anything after it) doesn't write new dumps.
+  if [[ "${FTR_RUNTIME_MAP_ENABLED:-}" =~ ^(1|true)$ ]]; then
+    unset NODE_V8_COVERAGE FTR_BROWSER_COVERAGE_DIR
+    echo "--- Collect FTR runtime map coverage for $config"
+    runtimeMapSummary="target/ftr-runtime-map/summaries/${runtimeMapSlug}.${BUILDKITE_JOB_ID:-local}.json.gz"
+    node .buildkite/pipeline-utils/ftr-runtime-map/ci_collect_functions "$runtimeMapDumpDir" \
+      --out "$runtimeMapSummary" \
+      --config-path "$config" \
+      --exit-code "$lastCode" || echo "runtime-map: summary collection failed (non-fatal)"
+    rm -rf "$runtimeMapDumpDir" || echo "runtime-map: dump cleanup failed (non-fatal)"
+    if [[ -f "$runtimeMapSummary" ]]; then
+      buildkite-agent artifact upload "$runtimeMapSummary" \
+        || echo "runtime-map: artifact upload failed (non-fatal)"
+    fi
+  fi
 
   # Scout reporter
   if [[ "${SCOUT_REPORTER_ENABLED:-}" =~ ^(1|true)$ ]]; then

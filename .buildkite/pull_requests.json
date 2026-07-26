@@ -29,6 +29,7 @@
         "^\\.backportrc\\.json$",
         "^src/dev/prs/kibana_qa_pr_list\\.json$",
         "^\\.buildkite/pull_requests\\.json$",
+        "^\\.buildkite/ftr-runtime-map/",
         "^\\.devcontainer/",
         "^\\.ona/",
         "(^|/)\\.gitignore$",

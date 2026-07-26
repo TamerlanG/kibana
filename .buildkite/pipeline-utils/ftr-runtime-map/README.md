@@ -6,7 +6,32 @@ subtracting a boot baseline. This is the "map producer" building block for
 per-config FTR selective testing (see `../affected-packages/README.md` for the
 selective-testing engine that Jest and Scout already use).
 
-**Status: experimental, local-only. Nothing in CI consumes this yet.**
+**Status: collection pipeline implemented (stage 1 of `CI_INTEGRATION_PLAN.md`).
+Nothing consumes the map yet.**
+
+## Daily CI collection (stage 1)
+
+The scheduled `kibana-ftr-runtime-map` pipeline
+(`.buildkite/pipelines/ftr_runtime_map/daily.yml`, cron 02:00 UTC on `main`)
+runs every enabled FTR config against a dist build and publishes the merged map:
+
+1. `FTR_RUNTIME_MAP_ENABLED=true` makes `ftr_configs.sh` arm
+   `NODE_V8_COVERAGE`/`FTR_BROWSER_COVERAGE_DIR` per config, then run
+   `ci_collect_functions` (in this directory) to upload one
+   `<config-slug>.<job-id>.json.gz` function summary per config and delete the
+   raw dumps. Collection can never change the test step's outcome.
+2. Unlike `record_coverage` there is **no baseline run** in CI. The merge step
+   (`.buildkite/scripts/steps/ftr_runtime_map/merge_runtime_map.ts`, logic +
+   accepted-risk notes in `merge_lib.ts`) removes boot/ambient noise
+   statistically instead: per manifest stratum, any function key executed by
+   ≥90% of successfully-collected configs is subtracted; packages left with no
+   surviving function anywhere in a flavor are published as
+   `bootNoisePackages`, which consumers must treat as "run everything".
+3. `commit_map.sh` publishes `.buildkite/ftr-runtime-map/runtime_map.json` via
+   a kibanamachine auto-merge PR (skip-CI'd through `pull_requests.json`).
+   Configs that produced no green summary are carried from the previous map for
+   up to 14 days, then marked `failed`; consumers must always run
+   failed/unmapped configs.
 
 ## Why runtime instead of static analysis
 

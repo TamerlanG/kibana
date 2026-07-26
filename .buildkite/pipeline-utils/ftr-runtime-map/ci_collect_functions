@@ -1,0 +1,87 @@
+#!/usr/bin/env node
+
+/*
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
+ */
+
+const path = require('path');
+const parseArgs = require('minimist');
+
+/** Register ts-node so the sibling `*.ts` modules can be required below. */
+require('ts-node').register({
+  transpileOnly: true,
+  compilerOptions: {
+    module: 'commonjs',
+  },
+  project: path.join(__dirname, '../../tsconfig.json'),
+});
+
+const { collectExecutedFunctions } = require(path.join(__dirname, './summarize'));
+const { buildCiSummary, writeCiSummary } = require(path.join(__dirname, './ci_summary'));
+
+const HELP_TEXT = `
+Usage: ci_collect_functions <dump-dir> --out <file> --config-path <config> --exit-code <n>
+
+CI-only companion to record_coverage: reads the raw V8 coverage dumps a single
+FTR config run produced (NODE_V8_COVERAGE + FTR_BROWSER_COVERAGE_DIR pointed at
+<dump-dir>) and writes a gzipped per-config function summary for the daily
+runtime-map merge step. No baseline is recorded or subtracted here — boot noise
+is removed statistically at merge time across each manifest stratum.
+
+Options:
+  --out <file>          Output path for the gzipped summary JSON (required)
+  --config-path <path>  Manifest-relative FTR config path (required)
+  --exit-code <n>       Exit code of the FTR run the dumps came from (required)
+  --help, -h            Show this help message
+`.trim();
+
+function fail(message) {
+  console.error(`ci_collect_functions: ${message}\n`);
+  console.error(HELP_TEXT);
+  process.exit(1);
+}
+
+function main() {
+  const argv = parseArgs(process.argv.slice(2), {
+    boolean: ['help'],
+    string: ['out', 'config-path', 'exit-code'],
+    alias: { h: 'help' },
+  });
+
+  if (argv.help) {
+    console.log(HELP_TEXT);
+    process.exit(0);
+  }
+  if (argv._.length !== 1) fail('expected exactly one <dump-dir> argument');
+  const out = argv.out;
+  const configPath = argv['config-path'];
+  const exitCode = Number(argv['exit-code']);
+  if (!out) fail('--out is required');
+  if (!configPath) fail('--config-path is required');
+  if (!Number.isInteger(exitCode))
+    fail(`--exit-code must be an integer, got: ${argv['exit-code']}`);
+
+  const collected = collectExecutedFunctions(path.resolve(argv._[0]));
+  const summary = buildCiSummary(collected, {
+    configPath,
+    exitCode,
+    jobId: process.env.BUILDKITE_JOB_ID || 'local',
+    buildId: process.env.BUILDKITE_BUILD_ID || 'local',
+    recordedAt: new Date().toISOString(),
+  });
+  writeCiSummary(summary, path.resolve(out));
+
+  const count = (byModule) => Object.values(byModule).reduce((sum, keys) => sum + keys.length, 0);
+  console.log(
+    `ci_collect_functions: ${configPath} exit=${exitCode} ` +
+      `server=${count(summary.server)}fns/${Object.keys(summary.server).length}modules ` +
+      `browser=${count(summary.browser)}fns/${Object.keys(summary.browser).length}modules → ${out}`
+  );
+}
+
+main();
