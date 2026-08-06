@@ -198,10 +198,8 @@ describe('eval_pipeline', () => {
 
     it('parses the JSON-array label form too (matches the child parser)', () => {
       expect(
-        getForwardablePrLabels(
-          '["evals:smoke-tests","help wanted","ci:build-with-rspack-optimizer"]'
-        )
-      ).toBe('evals:smoke-tests,ci:build-with-rspack-optimizer');
+        getForwardablePrLabels('["evals:smoke-tests","help wanted","ci:build-all-platforms"]')
+      ).toBe('evals:smoke-tests,ci:build-all-platforms');
     });
 
     it('returns an empty string when every label contains whitespace', () => {
