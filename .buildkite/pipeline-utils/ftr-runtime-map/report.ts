@@ -161,22 +161,58 @@ function printUnifiedTable(
 }
 
 /**
- * Write per-module file lists for the post-subtraction functions. Flat
- * `{ [moduleId]: filePaths[] }` when only server data exists; split into
- * `{ server, browser }` sections when browser coverage was recorded.
+ * Per-module function counts for the detail JSON, so a run is diagnosable
+ * after raw dumps are deleted. Counts mirror the printed table: post-subtraction
+ * surviving functions per module, split by origin.
+ */
+function countsByModule(
+  rows: ModuleCoverageRow[]
+): Record<string, { functions: number; files: number }> {
+  return Object.fromEntries(
+    [...rows]
+      .sort((a, b) => a.moduleId.localeCompare(b.moduleId))
+      .map((r) => [r.moduleId, { functions: r.functionCount, files: r.fileCount }])
+  );
+}
+
+/**
+ * Write per-module file lists for the post-subtraction functions, plus a
+ * `meta` block carrying the process/baseline totals and per-module function
+ * counts — so the run is diagnosable after raw dumps are deleted. With
+ * browser coverage: `{ server, browser, meta }`. Server-only: the module
+ * file lists stay top-level (existing shape) with `meta` added alongside.
  */
 export function writeDetailJson(summary: FtrCoverageSummary, outFile: string): void {
   const toSortedObject = (filesByModule: Map<string, string[]>) =>
     Object.fromEntries([...filesByModule.entries()].sort(([a], [b]) => a.localeCompare(b)));
+
+  const meta = {
+    run: {
+      processes: summary.processes,
+      totalFunctions: summary.totalRunFunctions,
+      totalBrowserFunctions: summary.totalRunBrowserFunctions,
+    },
+    baseline: summary.baselineProcesses
+      ? {
+          processes: summary.baselineProcesses,
+          totalFunctions: summary.totalBaselineFunctions ?? 0,
+          totalBrowserFunctions: summary.totalBaselineBrowserFunctions ?? 0,
+        }
+      : null,
+    newFunctionCount: summary.newFunctionCount,
+    newBrowserFunctionCount: summary.newBrowserFunctionCount,
+    serverCounts: countsByModule(summary.rows),
+    browserCounts: countsByModule(summary.browserRows),
+  };
 
   const detail =
     summary.totalRunBrowserFunctions > 0
       ? {
           server: toSortedObject(summary.filesByModule),
           browser: toSortedObject(summary.browserFilesByModule),
+          meta,
         }
-      : toSortedObject(summary.filesByModule);
-
+      : { ...toSortedObject(summary.filesByModule), meta };
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(outFile, JSON.stringify(detail, null, 2));
   console.error(`wrote ${outFile}`);
