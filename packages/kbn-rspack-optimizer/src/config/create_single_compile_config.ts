@@ -183,10 +183,23 @@ export async function createSingleCompileConfig(
   return {
     name: 'kibana',
     mode: dist ? 'production' : 'development',
-    // No sourcemaps in dist; cheap-module-source-map in dev for original-source
-    // quality (maps through SWC back to TypeScript/TSX). Aligns with rspack's
-    // new recommended dev default (PR #12934).
-    devtool: dist ? false : 'cheap-module-source-map',
+    // Source maps: three cases.
+    // 1. RSPACK_SOURCEMAPS=true → 'source-map' (external .map files with full
+    //    column mappings). Used by the ftr-runtime-map daily pipeline, which
+    //    uses v8-to-istanbul to attribute browser coverage back to source
+    //    files. External .map files avoid inflating chunk .js sizes that
+    //    bundle_metrics_plugin sums and limits.yml asserts. The .map files
+    //    are fetched at collection time and passed explicitly to
+    //    v8toIstanbul. minimize stays on — SwcJsMinimizerRspackPlugin chains
+    //    maps when devtool is set.
+    // 2. dist (no env) → false (no source maps in production bundles).
+    // 3. dev → 'cheap-module-source-map' (fast dev rebuilds, aligns with
+    //    rspack's recommended dev default, PR #12934).
+    devtool: process.env.RSPACK_SOURCEMAPS
+      ? 'source-map'
+      : dist
+      ? false
+      : 'cheap-module-source-map',
     // ES2020 target auto-sets output.environment for modern JS in rspack's
     // generated runtime code (arrow functions, const, destructuring, etc.).
     // Safe because SWC already targets ES2020 and .browserslistrc requires it.

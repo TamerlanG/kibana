@@ -190,6 +190,31 @@ describe('shared_config', () => {
       it('should disable source maps in production', () => {
         const options = tsRule.options as any;
         expect(options.sourceMaps).toBe(false);
+        expect(options.inlineSourcesContent).toBe(false);
+      });
+    });
+
+    describe('production mode with RSPACK_SOURCEMAPS=true', () => {
+      const prevSourceMaps = process.env.RSPACK_SOURCEMAPS;
+      beforeEach(() => {
+        process.env.RSPACK_SOURCEMAPS = 'true';
+      });
+      afterEach(() => {
+        if (prevSourceMaps === undefined) delete process.env.RSPACK_SOURCEMAPS;
+        else process.env.RSPACK_SOURCEMAPS = prevSourceMaps;
+      });
+
+      it('should enable source maps', () => {
+        const rules = getSwcLoaderRules(true);
+        const options = rules[0].options as any;
+        expect(options.sourceMaps).toBe(true);
+        expect(options.inlineSourcesContent).toBe(true);
+      });
+
+      it('should still disable React development mode', () => {
+        const rules = getSwcLoaderRules(true);
+        const options = rules[0].options as any;
+        expect(options.jsc.transform.react.development).toBe(false);
       });
     });
   });

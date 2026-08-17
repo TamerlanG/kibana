@@ -145,6 +145,27 @@ describe('rspack compile integration', () => {
       expect(config.optimization!.minimizer).toBeDefined();
       expect(config.optimization!.minimizer!.length).toBeGreaterThan(0);
     });
+
+    it('uses source-map devtool when RSPACK_SOURCEMAPS is set', async () => {
+      const prev = process.env.RSPACK_SOURCEMAPS;
+      process.env.RSPACK_SOURCEMAPS = 'true';
+      try {
+        const config = await createSingleCompileConfig({
+          repoRoot: REPO_ROOT,
+          dist: true,
+          watch: false,
+          cache: false,
+          examples: false,
+          testPlugins: false,
+        });
+
+        expect(config.devtool).toBe('source-map');
+        expect(config.optimization!.minimize).toBe(true);
+      } finally {
+        if (prev === undefined) delete process.env.RSPACK_SOURCEMAPS;
+        else process.env.RSPACK_SOURCEMAPS = prev;
+      }
+    });
   });
 
   describe('createExternalPluginConfig + compile', () => {

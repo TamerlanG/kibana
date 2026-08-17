@@ -107,6 +107,9 @@ export function getSharedResolveFallback(): Record<string, false> {
  */
 function getSwcOptions(dist: boolean, hmr: boolean = false) {
   const sharedConfig = getSharedConfig();
+  // When RSPACK_SOURCEMAPS is set, enable SWC source maps even in dist builds
+  // so v8-to-istanbul can trace browser coverage back to source files.
+  const enableSourceMaps = !dist || !!process.env.RSPACK_SOURCEMAPS;
 
   return {
     jsc: {
@@ -155,7 +158,7 @@ function getSwcOptions(dist: boolean, hmr: boolean = false) {
             {
               autoLabel: dist ? 'never' : 'dev-only',
               labelFormat: sharedConfig.emotion.labelFormat,
-              sourceMap: !dist,
+              sourceMap: enableSourceMaps,
             },
           ],
         ],
@@ -167,8 +170,8 @@ function getSwcOptions(dist: boolean, hmr: boolean = false) {
       // Use @swc/helpers for smaller output (like @babel/plugin-transform-runtime)
       externalHelpers: true,
     },
-    sourceMaps: !dist,
-    inlineSourcesContent: !dist,
+    sourceMaps: enableSourceMaps,
+    inlineSourcesContent: enableSourceMaps,
   };
 }
 
