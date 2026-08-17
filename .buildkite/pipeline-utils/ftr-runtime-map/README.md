@@ -104,12 +104,19 @@ Protocol (`Profiler.takePreciseCoverage`):
 - Dumps are written as `coverage-browser-<seq>.json` files in the same
   directory and layout as the Node dumps, so the summarizer parses them with
   the same code path.
-- Attribution: with the default (webpack) optimizer every plugin is its own
-  bundle, so the script URL names the plugin —
-  `…/bundles/plugin/<pluginId>/<version>/…` maps to the owning `@kbn/` module
-  via each `kibana.jsonc`'s `plugin.id`. `core`/`kbn-ui-shared-deps-*`/
-  `kbn-monaco` bundles map statically. Anything else under `bundles/` (e.g. the
-  opt-in `KBN_USE_RSPACK` unified build) degrades to `[browser-unattributed]`.
+- Attribution: the default rspack unified build compiles all plugins into a
+  single `bundles/kibana.bundle.js` (rspack runtime + orchestration shell, no
+  @kbn product code) plus async chunks under `bundles/chunks/`. Each plugin's
+  entry chunk is named `plugin-<pluginId>` (set by the `webpackChunkName`
+  magic comment in the generated unified entry), so
+  `…/bundles/chunks/plugin-<pluginId>.<hash>/…` maps to the owning `@kbn/`
+  module via each `kibana.jsonc`'s `plugin.id`; `plugin-core` maps to
+  `@kbn/core`. Shared/vendor chunks (`vendors`, `shared-plugins`, …) hold
+  cross-plugin code and degrade to `[browser-unattributed]`. The legacy
+  webpack optimizer (`KBN_USE_RSPACK=false`) still serves every plugin as its
+  own `…/bundles/plugin/<pluginId>/<version>/…` bundle, mapped the same way.
+  `core`/`kbn-ui-shared-deps-*`/`kbn-monaco` bundles map statically in both
+  layouts. Anything else under `bundles/` degrades to `[browser-unattributed]`.
 - Results are reported as a separate "browser modules" table and a `browser`
   section in the detail JSON.
 

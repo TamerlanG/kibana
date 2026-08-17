@@ -365,13 +365,30 @@ function classifyUrl(url: string, repoRoot: string): ClassifiedScript | null {
 }
 
 /**
- * Attribute a browser script URL to a module. With the default (webpack)
- * optimizer every plugin is served as its own bundle, so the URL names the
- * plugin: `<basePath>/<buildSha>/bundles/plugin/<pluginId>/<version>/...`.
- * The basePath/buildSha prefix is stripped so function keys align between the
- * test run and the baseline. Non-bundle scripts (inline, bootstrap.js,
- * third-party origins) are ignored; unknown bundle shapes (e.g. the opt-in
- * rspack unified build) degrade to BROWSER_UNATTRIBUTED_MODULE_ID.
+ * Attribute a browser script URL to a module. The basePath/buildSha prefix is
+ * stripped so function keys align between the test run and the baseline.
+ * Non-bundle scripts (inline, bootstrap.js, third-party origins) are ignored.
+ *
+ * Two bundle layouts are recognized:
+ *
+ *  - Legacy webpack optimizer (`KBN_USE_RSPACK=false`): every plugin is its
+ *    own bundle, so the URL names the plugin —
+ *    `…/bundles/plugin/<pluginId>/<version>/…` maps to the owning `@kbn/`
+ *    module via each `kibana.jsonc`'s `plugin.id`.
+ *
+ *  - Default rspack unified build: all plugins compile into a single
+ *    `bundles/kibana.bundle.js` (the rspack runtime + orchestration shell,
+ *    which carries no @kbn product code) plus async chunks under
+ *    `bundles/chunks/`. Each plugin's entry chunk is named `plugin-<pluginId>`
+ *    (via the `webpackChunkName` magic comment in the generated unified
+ *    entry), so `bundles/chunks/plugin-<pluginId>.<hash>.js` maps to the
+ *    owning module the same way; `plugin-core` maps to `@kbn/core`.
+ *    Shared/vendor chunks (`vendors`, `shared-plugins`, `shared-core`, …) hold
+ *    cross-plugin code and cannot be attributed to a single module.
+ *
+ * `core`/`kbn-ui-shared-deps-*`/`kbn-monaco` bundles map statically (shared
+ * deps are still emitted as separate bundles under rspack). Anything else
+ * under `bundles/` degrades to BROWSER_UNATTRIBUTED_MODULE_ID.
  */
 function classifyBrowserScriptUrl(url: string): ExecutedFunctionRecord | null {
   let pathname: string;
@@ -386,14 +403,39 @@ function classifyBrowserScriptUrl(url: string): ExecutedFunctionRecord | null {
     return null;
   }
   const filePath = pathname.slice(bundlesIndex + 1);
-  const [, kind, pluginId] = filePath.split('/');
+  const segments = filePath.split('/');
+  const kind = segments[1];
 
+  // Legacy webpack per-plugin bundles: bundles/plugin/<pluginId>/<version>/...
   if (kind === 'plugin') {
+    const pluginId = segments[2];
     return {
       moduleId: (pluginId && findModuleForPluginId(pluginId)) || BROWSER_UNATTRIBUTED_MODULE_ID,
       filePath,
     };
   }
+
+  // Rspack unified-build async chunks: bundles/chunks/<chunkName>.<contenthash>.js.
+  // chunkFilename is `chunks/[name].[contenthash:8].js`; strip the trailing
+  // `.<hash>.js` to recover the chunk name. plugin-<pluginId> chunks are
+  // attributable to the owning module; shared/vendor chunks are not.
+  if (kind === 'chunks') {
+    const file = segments[2];
+    const chunkName = file?.replace(/\.js$/, '').replace(/\.[a-f0-9]+$/, '');
+    if (chunkName?.startsWith('plugin-')) {
+      const pluginId = chunkName.slice('plugin-'.length);
+      const moduleId = pluginId === 'core' ? '@kbn/core' : findModuleForPluginId(pluginId);
+      return {
+        moduleId: moduleId || BROWSER_UNATTRIBUTED_MODULE_ID,
+        filePath,
+      };
+    }
+    return {
+      moduleId: BROWSER_UNATTRIBUTED_MODULE_ID,
+      filePath,
+    };
+  }
+
   return {
     moduleId: STATIC_BUNDLE_MODULES.get(kind) ?? BROWSER_UNATTRIBUTED_MODULE_ID,
     filePath,

@@ -292,6 +292,73 @@ describe('ftr-runtime-map summarize', () => {
       expect(browserFunctions.size).toBe(4);
     });
 
+    it('attributes rspack unified-build plugin chunks via plugin-<id> chunk name', () => {
+      const runDir = path.join(coverageRoot, 'run');
+      writeCoverageFile(runDir, 'coverage-browser-0000.json', [
+        // plugin entry chunk -> owning module
+        coverageScript(
+          '',
+          [{ name: 'setup', executed: true }],
+          bundleUrl('chunks/plugin-myPlugin.1a2b3c4d.js')
+        ),
+        // core plugin chunk -> @kbn/core
+        coverageScript(
+          '',
+          [{ name: 'coreBoot', executed: true }],
+          bundleUrl('chunks/plugin-core.9e8f7a6b.js')
+        ),
+        // shared-deps still served as a separate bundle under rspack
+        coverageScript(
+          '',
+          [{ name: 'dllFn', executed: true }],
+          bundleUrl('kbn-ui-shared-deps-npm/shared.dll.js')
+        ),
+        // shared/vendor chunks stay unattributed (cross-plugin code)
+        coverageScript(
+          '',
+          [{ name: 'sharedFn', executed: true }],
+          bundleUrl('chunks/shared-plugins.abc12345.js')
+        ),
+        coverageScript(
+          '',
+          [{ name: 'vendorFn', executed: true }],
+          bundleUrl('chunks/vendors-heavy.deadbeef.js')
+        ),
+        // the unified orchestration shell carries no @kbn product code
+        coverageScript('', [{ name: 'shellFn', executed: true }], bundleUrl('kibana.bundle.js')),
+        // unknown plugin id in a plugin- chunk -> unattributed
+        coverageScript(
+          '',
+          [{ name: 'unknownFn', executed: true }],
+          bundleUrl('chunks/plugin-notARealPlugin.00000000.js')
+        ),
+      ]);
+
+      const { browserFunctions } = collectExecutedFunctions(runDir);
+
+      const moduleIds = new Map(
+        [...browserFunctions.values()].map((r) => [r.filePath, r.moduleId])
+      );
+      expect(moduleIds.get('bundles/chunks/plugin-myPlugin.1a2b3c4d.js')).toBe(
+        '@kbn/my-plugin-plugin'
+      );
+      expect(moduleIds.get('bundles/chunks/plugin-core.9e8f7a6b.js')).toBe('@kbn/core');
+      expect(moduleIds.get('bundles/kbn-ui-shared-deps-npm/shared.dll.js')).toBe(
+        '@kbn/ui-shared-deps-npm'
+      );
+      expect(moduleIds.get('bundles/chunks/shared-plugins.abc12345.js')).toBe(
+        BROWSER_UNATTRIBUTED_MODULE_ID
+      );
+      expect(moduleIds.get('bundles/chunks/vendors-heavy.deadbeef.js')).toBe(
+        BROWSER_UNATTRIBUTED_MODULE_ID
+      );
+      expect(moduleIds.get('bundles/kibana.bundle.js')).toBe(BROWSER_UNATTRIBUTED_MODULE_ID);
+      expect(moduleIds.get('bundles/chunks/plugin-notARealPlugin.00000000.js')).toBe(
+        BROWSER_UNATTRIBUTED_MODULE_ID
+      );
+      expect(browserFunctions.size).toBe(7);
+    });
+
     it('splits mixed server and browser scripts from one dump into separate buckets', () => {
       const runDir = path.join(coverageRoot, 'run');
       writeCoverageFile(runDir, 'coverage-1-1-0.json', [
