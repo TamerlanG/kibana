@@ -9,7 +9,7 @@
 
 import { resolve } from 'path';
 import execa from 'execa';
-import { deleteSync as del } from 'del';
+import { deleteSync } from 'del';
 
 const ROOT_DIR = resolve(__dirname, '../../../../..');
 const MOCKS_DIR = resolve(__dirname, './mocks');
@@ -32,7 +32,7 @@ describe('Team Assignment', () => {
   });
 
   afterAll(() => {
-    del(teamAssignmentsPath);
+    deleteSync(teamAssignmentsPath);
   });
 
   describe(`when the codeowners file contains #CC#`, () => {
