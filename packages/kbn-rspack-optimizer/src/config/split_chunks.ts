@@ -7,9 +7,44 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
-import type { OptimizationSplitChunksOptions } from '@rspack/core';
+import type { Chunk, Module, OptimizationSplitChunksOptions } from '@rspack/core';
 
 type CacheGroups = NonNullable<OptimizationSplitChunksOptions['cacheGroups']>;
+
+/** Prefix applied to shared chunks consumed only by lazy (non-entry) chunks. */
+export const LAZY_SHARED_CHUNK_PREFIX = 'lazy-';
+
+/** Eager shared chunk name per cache group key; each also has a `lazy-` tier. */
+const SHARED_CHUNK_BASE_NAMES = {
+  vendorsHeavy: 'vendors-heavy',
+  vendors: 'vendors',
+  sharedPlugins: 'shared-plugins',
+  corePackages: 'shared-core',
+  sharedPackages: 'shared-packages',
+  solutionPackages: 'shared-solution-packages',
+  rootPackages: 'shared-root-packages',
+  default: 'shared-misc',
+} as const;
+
+/** Plugin entry chunks are named `plugin-<id>` by the generated unified entry. */
+const isPluginEntryChunk = (chunk: Chunk): boolean => chunk.name?.startsWith('plugin-') ?? false;
+
+/**
+ * Split a shared chunk into two tiers based on who consumes the module:
+ *
+ * - Modules used by at least one plugin entry chunk are needed at page load
+ *   anyway, so they go into the eager `<name>` chunk (preloaded by bootstrap).
+ * - Modules shared only between lazy `import()` chunks go into
+ *   `lazy-<name>`, which is fetched on demand the first time any of those
+ *   lazy chunks loads, instead of being preloaded on every page.
+ *
+ * Without this tiering, `minChunks: 3` promotes any module shared by 3 lazy
+ * app chunks into the eager shared chunk, inflating every page load.
+ */
+const tieredName =
+  (name: string) =>
+  (_module: Module, chunks: Chunk[]): string =>
+    chunks.some(isPluginEntryChunk) ? name : `${LAZY_SHARED_CHUNK_PREFIX}${name}`;
 
 /**
  * Return the splitChunks cache groups used by the unified single-compilation
@@ -43,7 +78,7 @@ export const getSplitChunksCacheGroups = (): CacheGroups => ({
   // contain segments like /plugins/ or /packages/ that match internal groups.
   vendorsHeavy: {
     test: /[\\/]node_modules[\\/](maplibre-gl|@xyflow|ace-builds|vega|pdf-lib|d3-|dagre|graphlib|ajv|handlebars)/,
-    name: 'vendors-heavy',
+    name: tieredName(SHARED_CHUNK_BASE_NAMES.vendorsHeavy),
     chunks: 'async' as const,
     priority: 45,
     minChunks: 3,
@@ -55,7 +90,7 @@ export const getSplitChunksCacheGroups = (): CacheGroups => ({
   // consolidated into a single 'vendors' chunk.
   vendors: {
     test: /[\\/]node_modules[\\/]/,
-    name: 'vendors',
+    name: tieredName(SHARED_CHUNK_BASE_NAMES.vendors),
     priority: 40,
     minChunks: 3,
     reuseExistingChunk: true,
@@ -69,7 +104,7 @@ export const getSplitChunksCacheGroups = (): CacheGroups => ({
   //   - x-pack/solutions/<solution>/plugins/<name>/
   sharedPlugins: {
     test: /[\\/]plugins[\\/]/,
-    name: 'shared-plugins',
+    name: tieredName(SHARED_CHUNK_BASE_NAMES.sharedPlugins),
     chunks: 'async' as const,
     priority: 35,
     minChunks: 3,
@@ -84,7 +119,7 @@ export const getSplitChunksCacheGroups = (): CacheGroups => ({
   // per-subdomain cache isolation adds no value.
   corePackages: {
     test: /[\\/]src[\\/]core[\\/]packages[\\/]/,
-    name: 'shared-core',
+    name: tieredName(SHARED_CHUNK_BASE_NAMES.corePackages),
     chunks: 'async' as const,
     priority: 32,
     minChunks: 3,
@@ -98,7 +133,7 @@ export const getSplitChunksCacheGroups = (): CacheGroups => ({
   // Merged into a single 'shared-packages' chunk.
   sharedPackages: {
     test: /[\\/]packages[\\/](?:shared|private)[\\/]/,
-    name: 'shared-packages',
+    name: tieredName(SHARED_CHUNK_BASE_NAMES.sharedPackages),
     chunks: 'async' as const,
     priority: 31,
     minChunks: 3,
@@ -111,7 +146,7 @@ export const getSplitChunksCacheGroups = (): CacheGroups => ({
   // Merged into a single 'shared-solution-packages' chunk.
   solutionPackages: {
     test: /[\\/]solutions[\\/][^\\/]+[\\/]packages[\\/]/,
-    name: 'shared-solution-packages',
+    name: tieredName(SHARED_CHUNK_BASE_NAMES.solutionPackages),
     chunks: 'async' as const,
     priority: 30,
     minChunks: 3,
@@ -125,7 +160,7 @@ export const getSplitChunksCacheGroups = (): CacheGroups => ({
   // chunks, but kept as a safety net for future browser-side packages.
   rootPackages: {
     test: /[\\/]packages[\\/]kbn-/,
-    name: 'shared-root-packages',
+    name: tieredName(SHARED_CHUNK_BASE_NAMES.rootPackages),
     chunks: 'async' as const,
     priority: 29,
     minChunks: 3,
@@ -139,22 +174,21 @@ export const getSplitChunksCacheGroups = (): CacheGroups => ({
     minChunks: 3,
     priority: -20,
     reuseExistingChunk: true,
-    name: 'shared-misc',
+    name: tieredName(SHARED_CHUNK_BASE_NAMES.default),
   },
 });
 
 /**
- * Derive the set of named shared chunk names from the cache groups config.
- * Used by BundleMetricsPlugin (to identify shared chunks vs the `kibana`
- * entry chunk) and by validateLimitsForAllBundles (to tolerate shared chunk
- * entries in limits.yml).
+ * The set of named shared chunk names (eager and lazy tiers) produced by the
+ * cache groups. Used by BundleMetricsPlugin (to identify shared chunks vs the
+ * `kibana` entry chunk) and by validateLimitsForAllBundles (to tolerate shared
+ * chunk entries in limits.yml).
  */
 export const getSharedChunkNames = (): Set<string> => {
   const names = new Set<string>();
-  for (const group of Object.values(getSplitChunksCacheGroups())) {
-    if (group && typeof group === 'object' && typeof group.name === 'string') {
-      names.add(group.name);
-    }
+  for (const name of Object.values(SHARED_CHUNK_BASE_NAMES)) {
+    names.add(name);
+    names.add(`${LAZY_SHARED_CHUNK_PREFIX}${name}`);
   }
   return names;
 };
