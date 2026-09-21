@@ -33,7 +33,6 @@ import type { WorkflowsBaseTelemetry } from './common/service/telemetry';
 import type { DeepLinksParams } from './deep_links';
 import { getDeepLinks } from './deep_links';
 import { triggerSchemas } from './trigger_schemas';
-import { registerConnectorEventTriggersPublic } from './triggers/register_connector_event_triggers';
 import type {
   WorkflowsPublicPluginSetup,
   WorkflowsPublicPluginSetupDependencies,
@@ -95,11 +94,18 @@ export class WorkflowsPlugin
 
     registerConnectorType();
 
-    registerConnectorEventTriggersPublic({
-      inboundEventsEnabled: plugins.actions.isInboundEventsEnabled,
-      registerTriggerDefinition: (definition) =>
-        plugins.workflowsExtensions.registerTriggerDefinition(definition),
-    });
+    // Connector event triggers depend on @kbn/connector-specs (all connector specs); load it
+    // lazily and only when inbound events are enabled to keep it out of the page-load bundle.
+    if (plugins.actions.isInboundEventsEnabled) {
+      import('./triggers/register_connector_event_triggers').then(
+        ({ registerConnectorEventTriggersPublic }) =>
+          registerConnectorEventTriggersPublic({
+            inboundEventsEnabled: true,
+            registerTriggerDefinition: (definition) =>
+              plugins.workflowsExtensions.registerTriggerDefinition(definition),
+          })
+      );
+    }
 
     this.setupAgentBuilderStart(core);
 

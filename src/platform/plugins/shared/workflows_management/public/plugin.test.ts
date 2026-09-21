@@ -127,11 +127,13 @@ describe('WorkflowsPlugin', () => {
       expect(setupDeps.workflowsExtensions.registerTriggerDefinition).not.toHaveBeenCalled();
     });
 
-    it('registers inboundWebhook.received when inbound events are enabled', () => {
+    it('registers inboundWebhook.received when inbound events are enabled', async () => {
       coreSetup.uiSettings.get.mockReturnValue(true);
       setupDeps.actions.isInboundEventsEnabled = true;
 
       plugin.setup(coreSetup, setupDeps as any);
+      // Registration is deferred behind a dynamic import of the trigger module.
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(setupDeps.workflowsExtensions.registerTriggerDefinition).toHaveBeenCalledWith(
         expect.objectContaining({
