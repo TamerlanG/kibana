@@ -14,12 +14,17 @@ import { CHUNK_MANIFEST_FILENAME } from '../paths';
 /**
  * Emits `chunk-manifest.json` with a single field:
  *
- * - `allChunks`: ALL async chunks (named shared + plugin entries + unnamed).
- *   Used by `bootstrap_renderer.ts` to populate the bootstrap `load()` array,
- *   enabling eager parallel download of every chunk via `<script async=false>`
- *   before `kibana.bundle.js`. Rspack's JSONP mechanism queues module factories
- *   so that dynamic imports resolve without network requests once the runtime
- *   drains the queue.
+ * - `allChunks`: every chunk reachable from the `kibana` entrypoint's direct
+ *   children, i.e. all plugin entry chunks (`plugin-<id>`) plus the eager
+ *   shared chunks they depend on. Used by `bootstrap_renderer.ts` to populate
+ *   the bootstrap `load()` array, enabling eager parallel download via
+ *   `<script async=false>` before `kibana.bundle.js`. Rspack's JSONP mechanism
+ *   queues module factories so that dynamic imports resolve without network
+ *   requests once the runtime drains the queue.
+ *
+ *   Chunks only reachable from nested `import()` blocks (lazy app chunks and
+ *   the `lazy-*` shared tier from split_chunks.ts) are deliberately excluded
+ *   and fetched on demand.
  *
  * If CI or FTR shows ChunkLoadError / 404 on /bundles/chunks/, compare emitted assets to
  * chunk-manifest.json and validate script order vs Rspack chunk graph (alphabetical sort here
@@ -34,55 +39,19 @@ export class ChunkPreloadManifestPlugin {
           stage: rspack.Compilation.PROCESS_ASSETS_STAGE_REPORT,
         },
         () => {
-          const splitChunksConfig = compiler.options.optimization?.splitChunks;
-          const cacheGroups =
-            typeof splitChunksConfig === 'object' && splitChunksConfig
-              ? splitChunksConfig.cacheGroups
-              : undefined;
-
-          const staticNameGroupKeys = new Set<string>();
-          if (cacheGroups && typeof cacheGroups === 'object') {
-            for (const [key, group] of Object.entries(cacheGroups)) {
-              if (group && typeof group === 'object' && typeof group.name === 'string') {
-                staticNameGroupKeys.add(key);
-              }
-            }
-          }
-
-          const isNamedSharedChunk = (chunk: Chunk): boolean => {
-            for (const hint of chunk.idNameHints) {
-              if (staticNameGroupKeys.has(hint)) return true;
-            }
-            return false;
-          };
-
-          const collectJsFiles = (chunk: Chunk, into: string[]) => {
-            for (const file of chunk.files) {
-              if (file.endsWith('.js')) {
-                into.push(file);
-              }
-            }
-          };
-
-          // Collect ALL async chunks for the load() array: named shared chunks
-          // first, then remaining entrypoint children (deduplicated).
           const allChunkFiles: string[] = [];
           const seen = new Set<Chunk>();
-
-          for (const chunk of compilation.chunks) {
-            if (isNamedSharedChunk(chunk)) {
-              collectJsFiles(chunk, allChunkFiles);
-              seen.add(chunk);
-            }
-          }
 
           const entrypoint = compilation.entrypoints.get('kibana');
           if (entrypoint) {
             for (const childGroup of entrypoint.childrenIterable) {
               for (const chunk of childGroup.chunks) {
-                if (!seen.has(chunk)) {
-                  collectJsFiles(chunk, allChunkFiles);
-                  seen.add(chunk);
+                if (seen.has(chunk)) continue;
+                seen.add(chunk);
+                for (const file of chunk.files) {
+                  if (file.endsWith('.js')) {
+                    allChunkFiles.push(file);
+                  }
                 }
               }
             }

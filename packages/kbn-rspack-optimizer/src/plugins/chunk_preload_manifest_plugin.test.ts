@@ -9,19 +9,17 @@
 
 import { ChunkPreloadManifestPlugin } from './chunk_preload_manifest_plugin';
 
-const createMockChunk = (
-  files: string[],
-  idNameHints: string[] = []
-): { files: Set<string>; idNameHints: Set<string> } => ({
-  files: new Set(files),
-  idNameHints: new Set(idNameHints),
-});
+interface MockChunk {
+  files: Set<string>;
+}
 
-const createMockCompiler = (opts: {
-  cacheGroups?: Record<string, { name?: string }>;
-  chunks: Array<{ files: Set<string>; idNameHints: Set<string> }>;
-  entrypoints?: Map<string, { childrenIterable: Array<{ chunks: typeof opts.chunks }> }>;
-}) => {
+interface MockChunkGroup {
+  chunks: MockChunk[];
+}
+
+const createMockChunk = (files: string[]): MockChunk => ({ files: new Set(files) });
+
+const createMockCompiler = (opts: { chunks: MockChunk[]; entryChildren?: MockChunkGroup[] }) => {
   let processAssetsFn: () => void;
   const emittedAssets: Array<{ name: string; source: string }> = [];
 
@@ -34,20 +32,15 @@ const createMockCompiler = (opts: {
       },
     },
     chunks: new Set(opts.chunks),
-    entrypoints: opts.entrypoints ?? new Map(),
+    entrypoints: opts.entryChildren
+      ? new Map([['kibana', { childrenIterable: opts.entryChildren }]])
+      : new Map(),
     emitAsset: (name: string, source: { source: () => string }) => {
       emittedAssets.push({ name, source: source.source() });
     },
   };
 
   const compiler = {
-    options: {
-      optimization: {
-        splitChunks: {
-          cacheGroups: opts.cacheGroups ?? {},
-        },
-      },
-    },
     hooks: {
       compilation: {
         tap: (_name: string, fn: (comp: typeof compilation) => void) => {
@@ -64,145 +57,56 @@ const createMockCompiler = (opts: {
   };
 };
 
+const emitManifest = (opts: Parameters<typeof createMockCompiler>[0]) => {
+  const { compiler, runProcessAssets, getEmittedAssets } = createMockCompiler(opts);
+  new ChunkPreloadManifestPlugin().apply(compiler as any);
+  runProcessAssets();
+  return getEmittedAssets();
+};
+
 describe('ChunkPreloadManifestPlugin', () => {
-  it('classifies named shared chunks based on cacheGroup keys', () => {
-    const sharedChunk = createMockChunk(['shared.js'], ['vendorShared']);
-    const pluginChunk = createMockChunk(['plugin.js'], ['other']);
+  it('includes plugin entry chunks and the shared chunks in their groups', () => {
+    const sharedChunk = createMockChunk(['chunks/shared-plugins.js']);
+    const pluginA = createMockChunk(['chunks/plugin-a.js']);
+    const pluginB = createMockChunk(['chunks/plugin-b.js']);
 
-    const { compiler, runProcessAssets, getEmittedAssets } = createMockCompiler({
-      cacheGroups: { vendorShared: { name: 'vendor-shared' } },
-      chunks: [sharedChunk, pluginChunk],
+    const [{ source }] = emitManifest({
+      chunks: [sharedChunk, pluginA, pluginB],
+      entryChildren: [{ chunks: [pluginA, sharedChunk] }, { chunks: [pluginB, sharedChunk] }],
     });
 
-    const plugin = new ChunkPreloadManifestPlugin();
-    plugin.apply(compiler as any);
-    runProcessAssets();
-
-    const manifest = JSON.parse(getEmittedAssets()[0].source);
-    expect(manifest.allChunks).toContain('shared.js');
+    expect(JSON.parse(source).allChunks).toEqual([
+      'chunks/plugin-a.js',
+      'chunks/plugin-b.js',
+      'chunks/shared-plugins.js',
+    ]);
   });
 
-  it('includes all async chunks from kibana entrypoint children in allChunks', () => {
-    const sharedChunk = createMockChunk(['shared.js'], ['vendor']);
-    const asyncChunk = createMockChunk(['async-plugin.js']);
+  it('excludes chunks that are not reachable from the entrypoint children', () => {
+    const pluginChunk = createMockChunk(['chunks/plugin-a.js']);
+    const lazyShared = createMockChunk(['chunks/lazy-shared-plugins~a.js']);
+    const lazyApp = createMockChunk(['chunks/123.js']);
 
-    const entrypoints = new Map([
-      [
-        'kibana',
-        {
-          childrenIterable: [{ chunks: [asyncChunk] }],
-        },
-      ],
-    ]);
-
-    const { compiler, runProcessAssets, getEmittedAssets } = createMockCompiler({
-      cacheGroups: { vendor: { name: 'vendor' } },
-      chunks: [sharedChunk, asyncChunk],
-      entrypoints,
+    const [{ source }] = emitManifest({
+      chunks: [pluginChunk, lazyShared, lazyApp],
+      entryChildren: [{ chunks: [pluginChunk] }],
     });
 
-    const plugin = new ChunkPreloadManifestPlugin();
-    plugin.apply(compiler as any);
-    runProcessAssets();
-
-    const manifest = JSON.parse(getEmittedAssets()[0].source);
-    expect(manifest.allChunks).toContain('shared.js');
-    expect(manifest.allChunks).toContain('async-plugin.js');
-  });
-
-  it('deduplicates shared chunks in allChunks', () => {
-    const sharedChunk = createMockChunk(['shared.js'], ['vendor']);
-
-    const entrypoints = new Map([
-      [
-        'kibana',
-        {
-          childrenIterable: [{ chunks: [sharedChunk] }],
-        },
-      ],
-    ]);
-
-    const { compiler, runProcessAssets, getEmittedAssets } = createMockCompiler({
-      cacheGroups: { vendor: { name: 'vendor' } },
-      chunks: [sharedChunk],
-      entrypoints,
-    });
-
-    const plugin = new ChunkPreloadManifestPlugin();
-    plugin.apply(compiler as any);
-    runProcessAssets();
-
-    const manifest = JSON.parse(getEmittedAssets()[0].source);
-    const sharedJsCount = manifest.allChunks.filter((f: string) => f === 'shared.js').length;
-    expect(sharedJsCount).toBe(1);
+    expect(JSON.parse(source).allChunks).toEqual(['chunks/plugin-a.js']);
   });
 
   it('only collects .js files (excludes .css, .map)', () => {
-    const chunk = createMockChunk(['bundle.js', 'bundle.css', 'bundle.js.map'], ['vendor']);
+    const chunk = createMockChunk(['bundle.js', 'bundle.css', 'bundle.js.map']);
 
-    const { compiler, runProcessAssets, getEmittedAssets } = createMockCompiler({
-      cacheGroups: { vendor: { name: 'vendor' } },
-      chunks: [chunk],
-    });
+    const [{ source }] = emitManifest({ chunks: [chunk], entryChildren: [{ chunks: [chunk] }] });
 
-    const plugin = new ChunkPreloadManifestPlugin();
-    plugin.apply(compiler as any);
-    runProcessAssets();
-
-    const manifest = JSON.parse(getEmittedAssets()[0].source);
-    expect(manifest.allChunks).toEqual(['bundle.js']);
+    expect(JSON.parse(source).allChunks).toEqual(['bundle.js']);
   });
 
-  it('sorts files alphabetically', () => {
-    const chunkA = createMockChunk(['z-shared.js'], ['groupA']);
-    const chunkB = createMockChunk(['a-shared.js'], ['groupB']);
+  it('emits an empty manifest when there is no kibana entrypoint', () => {
+    const [emitted] = emitManifest({ chunks: [createMockChunk(['shared.js'])] });
 
-    const { compiler, runProcessAssets, getEmittedAssets } = createMockCompiler({
-      cacheGroups: { groupA: { name: 'z' }, groupB: { name: 'a' } },
-      chunks: [chunkA, chunkB],
-    });
-
-    const plugin = new ChunkPreloadManifestPlugin();
-    plugin.apply(compiler as any);
-    runProcessAssets();
-
-    const manifest = JSON.parse(getEmittedAssets()[0].source);
-    expect(manifest.allChunks).toEqual(['a-shared.js', 'z-shared.js']);
-  });
-
-  it('emits valid JSON with { allChunks } shape', () => {
-    const chunk = createMockChunk(['test.js'], ['group']);
-
-    const { compiler, runProcessAssets, getEmittedAssets } = createMockCompiler({
-      cacheGroups: { group: { name: 'test' } },
-      chunks: [chunk],
-    });
-
-    const plugin = new ChunkPreloadManifestPlugin();
-    plugin.apply(compiler as any);
-    runProcessAssets();
-
-    const emitted = getEmittedAssets();
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0].name).toBe('chunk-manifest.json');
-    const manifest = JSON.parse(emitted[0].source);
-    expect(manifest).not.toHaveProperty('sharedChunks');
-    expect(manifest).toHaveProperty('allChunks');
-  });
-
-  it('includes named shared chunks in allChunks when there is no kibana entrypoint', () => {
-    const sharedChunk = createMockChunk(['shared.js'], ['vendor']);
-
-    const { compiler, runProcessAssets, getEmittedAssets } = createMockCompiler({
-      cacheGroups: { vendor: { name: 'vendor' } },
-      chunks: [sharedChunk],
-    });
-
-    const plugin = new ChunkPreloadManifestPlugin();
-    plugin.apply(compiler as any);
-    runProcessAssets();
-
-    const manifest = JSON.parse(getEmittedAssets()[0].source);
-    expect(manifest.allChunks).toEqual(['shared.js']);
+    expect(emitted.name).toBe('chunk-manifest.json');
+    expect(JSON.parse(emitted.source)).toEqual({ allChunks: [] });
   });
 });

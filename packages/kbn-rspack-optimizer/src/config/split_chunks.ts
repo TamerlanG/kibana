@@ -30,21 +30,50 @@ const SHARED_CHUNK_BASE_NAMES = {
 const isPluginEntryChunk = (chunk: Chunk): boolean => chunk.name?.startsWith('plugin-') ?? false;
 
 /**
+ * Identify the source unit a module belongs to: a Kibana plugin, a Kibana
+ * package, or an npm package. Used to name lazy-tier shared chunks so that a
+ * lazy consumer only downloads the shared code of the units it actually uses,
+ * instead of one monolithic lazy chunk.
+ */
+const LAZY_ORIGIN_PATTERNS: readonly RegExp[] = [
+  /[\\/]node_modules[\\/](@[^\\/]+[\\/][^\\/]+|[^\\/]+)/,
+  /[\\/]plugins[\\/](?:shared|private)[\\/]([^\\/]+)/,
+  /[\\/]solutions[\\/][^\\/]+[\\/]plugins[\\/]([^\\/]+)/,
+  /[\\/]src[\\/]core[\\/]packages[\\/]([^\\/]+)/,
+  /[\\/]packages[\\/](?:shared|private)[\\/]([^\\/]+)/,
+  /[\\/]packages[\\/]([^\\/]+)/,
+];
+
+const lazyOriginOf = (module: Module): string => {
+  const resource = module.nameForCondition() ?? '';
+  for (const pattern of LAZY_ORIGIN_PATTERNS) {
+    const match = pattern.exec(resource);
+    if (match) {
+      return match[1].replace(/[\\/]/g, '_');
+    }
+  }
+  return 'misc';
+};
+
+/**
  * Split a shared chunk into two tiers based on who consumes the module:
  *
  * - Modules used by at least one plugin entry chunk are needed at page load
  *   anyway, so they go into the eager `<name>` chunk (preloaded by bootstrap).
  * - Modules shared only between lazy `import()` chunks go into
- *   `lazy-<name>`, which is fetched on demand the first time any of those
- *   lazy chunks loads, instead of being preloaded on every page.
+ *   `lazy-<name>~<origin>`, fetched on demand the first time a lazy chunk
+ *   that uses code from that origin loads, instead of being preloaded on
+ *   every page.
  *
  * Without this tiering, `minChunks: 3` promotes any module shared by 3 lazy
  * app chunks into the eager shared chunk, inflating every page load.
  */
 const tieredName =
   (name: string) =>
-  (_module: Module, chunks: Chunk[]): string =>
-    chunks.some(isPluginEntryChunk) ? name : `${LAZY_SHARED_CHUNK_PREFIX}${name}`;
+  (module: Module, chunks: Chunk[]): string =>
+    chunks.some(isPluginEntryChunk)
+      ? name
+      : `${LAZY_SHARED_CHUNK_PREFIX}${name}~${lazyOriginOf(module)}`;
 
 /**
  * Return the splitChunks cache groups used by the unified single-compilation
@@ -179,16 +208,11 @@ export const getSplitChunksCacheGroups = (): CacheGroups => ({
 });
 
 /**
- * The set of named shared chunk names (eager and lazy tiers) produced by the
- * cache groups. Used by BundleMetricsPlugin (to identify shared chunks vs the
- * `kibana` entry chunk) and by validateLimitsForAllBundles (to tolerate shared
- * chunk entries in limits.yml).
+ * The eager shared chunk names produced by the cache groups. Used by
+ * BundleMetricsPlugin (to report each preloaded shared chunk individually and
+ * keep the `kibana` entry chunk out of that set) and by
+ * validateLimitsForAllBundles (to tolerate shared chunk entries in limits.yml).
+ * Lazy-tier chunks (`lazy-<name>~<origin>`) are tracked in aggregate.
  */
-export const getSharedChunkNames = (): Set<string> => {
-  const names = new Set<string>();
-  for (const name of Object.values(SHARED_CHUNK_BASE_NAMES)) {
-    names.add(name);
-    names.add(`${LAZY_SHARED_CHUNK_PREFIX}${name}`);
-  }
-  return names;
-};
+export const getSharedChunkNames = (): Set<string> =>
+  new Set(Object.values(SHARED_CHUNK_BASE_NAMES));
