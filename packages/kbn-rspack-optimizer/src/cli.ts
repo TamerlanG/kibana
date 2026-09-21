@@ -16,6 +16,7 @@ import type { ToolingLog } from '@kbn/tooling-log';
 import { parseThemeTags } from '@kbn/core-ui-settings-common';
 import { KIBANA_GROUPS, type KibanaGroup } from '@kbn/projects-solutions-groups';
 import { runBuild } from './run_build';
+import { resolveCacheEnabled } from './resolve_cache_enabled';
 import {
   validateLimitsForAllBundles,
   updateBundleLimits,
@@ -56,9 +57,9 @@ export function runRspackCli(options: CliOptions = {}): void {
         throw createFlagError('expected --test-plugins to have no value');
       }
 
-      // cache and hmr are declared as positive booleans defaulting to true.
-      // getopts interprets --no-cache as cache=false and --no-hmr as hmr=false.
-      const cache = flags.cache as boolean;
+      // hmr is declared as a positive boolean defaulting to true; getopts
+      // interprets --no-hmr as hmr=false. cache has no default so that its
+      // effective value can depend on the build mode (see below).
       const hmr = flags.hmr as boolean;
 
       const profile = flags.profile ?? false;
@@ -190,6 +191,11 @@ export function runRspackCli(options: CliOptions = {}): void {
       }
 
       const effectiveDist = updateLimits || dist;
+      const cache = resolveCacheEnabled({
+        argv: process.argv.slice(2),
+        dist: effectiveDist,
+        watch: updateLimits ? false : watch,
+      });
       // CI validates distribution metrics built with example and test plugins, so limit updates
       // must include the same plugin set.
       const effectiveExamples = updateLimits || examples;
@@ -261,7 +267,6 @@ export function runRspackCli(options: CliOptions = {}): void {
           dist: false,
           examples: false,
           'test-plugins': false,
-          cache: true,
           hmr: true,
           profile: false,
           'profile-stats-only': false,
@@ -277,7 +282,8 @@ export function runRspackCli(options: CliOptions = {}): void {
             --plugin-groups <groups>  Comma-separated plugin groups to build (default: all).
                                       Mirrors the server's plugins.allowlistPluginGroups setting.
             --output-root <dir>       Output root directory (default: repo root)
-            --no-cache                Disable filesystem caching
+            --no-cache                Disable filesystem caching (default in --watch / dev builds:
+                                      on; default in one-shot --dist builds: off, pass --cache to enable)
             --no-hmr                  Disable Hot Module Replacement in watch mode
 
           Debugging:

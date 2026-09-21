@@ -82,6 +82,7 @@ Build Options:
   --themes <tags>           Comma-separated theme tags to build (default: all)
   --output-root <dir>       Output root directory (default: repo root)
   --no-cache                Disable filesystem caching
+  --cache                   Enable filesystem caching for a one-shot --dist build
   --no-hmr                  Disable Hot Module Replacement in watch mode
 
 Debugging:
@@ -166,7 +167,8 @@ The optimizer uses RSPack's persistent filesystem cache for fast rebuilds betwee
 - **Cache location**: `node_modules/.cache/.rspack-cache/{dev|dist}/`
 - **Separate caches**: Dev and dist builds use isolated cache directories to prevent stale cache issues
 - **Invalidation**: Cache version includes a hash of all config files (`externals.ts`, `shared_config.ts`, etc.) so config changes automatically invalidate the cache
-- **Disable**: Use `--no-cache` to skip caching entirely
+- **Default**: on for dev/watch builds; off for one-shot `--dist` builds (writing the cache costs
+  ~25-30% of a cold dist build and is never read back). Use `--cache` to opt in, `--no-cache` to opt out.
 - **Clear all**: `rm -rf node_modules/.cache/.rspack-cache`
 
 ## Watch Mode
