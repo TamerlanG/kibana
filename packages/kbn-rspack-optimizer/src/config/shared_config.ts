@@ -27,11 +27,14 @@ export function getSharedResolveConfig(repoRoot: string): Configuration['resolve
     mainFiles: ['index'],
     alias: {
       // Match the DLL's resolve aliases so externalized EUI paths resolve to
-      // the same optimize/es/ entry points used when building the DLL.
+      // the same optimize/es/ entry points used when building the DLL. Deep
+      // `@elastic/eui/lib/*` (CJS) imports are redirected too: the DLL only
+      // contains optimize/es/, so without this every lib/ import re-bundles a
+      // second copy of that EUI module. lib/ and optimize/es/ ship identical
+      // file layouts.
       '@elastic/eui$': '@elastic/eui/optimize/es',
-      '@elastic/eui/lib/components/provider/nested$':
-        '@elastic/eui/optimize/es/components/provider/nested',
-      '@elastic/eui/lib/services/theme/warning$': '@elastic/eui/optimize/es/services/theme/warning',
+      '@elastic/eui/lib': '@elastic/eui/optimize/es',
+      '@elastic/eui/es': '@elastic/eui/optimize/es',
       'react-dom$': 'react-dom/profiling',
       'scheduler/tracing': 'scheduler/tracing-profiling',
       buffer: [
