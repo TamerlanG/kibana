@@ -29,13 +29,19 @@ describe('updateAliases', () => {
       body: { error: { type: 'es_type', reason: 'es_reason' } },
     })
   );
-  const client = elasticsearchClientMock.createInternalClient(
-    elasticsearchClientMock.createErrorTransportRequestPromise(retryableError)
-  );
+  // Rejected promises created while the suite is collected are only awaited later by the
+  // tests; mark them handled so they are not reported as unhandled rejections meanwhile.
+  const retryableErrorRejection =
+    elasticsearchClientMock.createErrorTransportRequestPromise(retryableError);
+  retryableErrorRejection.catch(() => {});
+  const client = elasticsearchClientMock.createInternalClient(retryableErrorRejection);
 
   const nonRetryableError = new Error('crash');
+  const nonRetryableErrorRejection =
+    elasticsearchClientMock.createErrorTransportRequestPromise(nonRetryableError);
+  nonRetryableErrorRejection.catch(() => {});
   const clientWithNonRetryableError = elasticsearchClientMock.createInternalClient(
-    elasticsearchClientMock.createErrorTransportRequestPromise(nonRetryableError)
+    nonRetryableErrorRejection
   );
   it('calls catchRetryableEsClientErrors when the promise rejects', async () => {
     const task = updateAliases({ client, aliasActions: [] });

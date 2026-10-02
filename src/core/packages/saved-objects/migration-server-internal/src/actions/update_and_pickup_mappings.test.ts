@@ -33,9 +33,12 @@ describe('updateAndPickupMappings', () => {
         body: { error: { type: 'es_type', reason: 'es_reason' } },
       })
     );
-    const client = elasticsearchClientMock.createInternalClient(
-      elasticsearchClientMock.createErrorTransportRequestPromise(retryableError)
-    );
+    // Rejected promises created while the suite is collected are only awaited later by the
+    // tests; mark them handled so they are not reported as unhandled rejections meanwhile.
+    const retryableErrorRejection =
+      elasticsearchClientMock.createErrorTransportRequestPromise(retryableError);
+    retryableErrorRejection.catch(() => {});
+    const client = elasticsearchClientMock.createInternalClient(retryableErrorRejection);
 
     it('calls catchRetryableEsClientErrors when the promise rejects', async () => {
       const task = updateAndPickupMappings({
